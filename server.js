@@ -28,7 +28,7 @@ const API_LOBBY = 'https://wlb.tele68.com/v1/lobby/auth/login';
 const API_REDEEM = 'https://gameapi.tele68.com/v1/giftcode/redemption';
 const DEFAULT_CHANNEL = 'codelaucuagame'; // Kênh Telegram mặc định
 const DEFAULT_REGEX = '[A-Z]{8,10}';       // Định dạng code mặc định
-const DEFAULT_POLL = 5;                    // Chu kỳ delay mặc định (giây)
+const DEFAULT_POLL = 1;                    // Chu kỳ delay mặc định (giây)
 
 // ==================== STATE ====================
 const S = {
