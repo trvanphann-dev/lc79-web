@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-// ==================== CONFIG TỐI ƯU ====================
+// ==================== CONFIG ====================
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const WEB_USER = process.env.WEB_USER || 'admin';
@@ -26,11 +26,10 @@ const API_LOGIN = 'https://apifo88daigia.tele68.com/api';
 const API_LOBBY = 'https://wlb.tele68.com/v1/lobby/auth/login';
 const API_REDEEM = 'https://gameapi.tele68.com/v1/giftcode/redemption';
 
-// --- CẤU HÌNH TỐC ĐỘ CAO ---
 const DEFAULT_CHANNEL = 'codelaucuagame'; 
-const DEFAULT_REGEX = '[A-Z0-9]{6,12}'; // Nới lỏng regex để bắt mọi thể loại code
-const FAST_POLL_MS = 1500; // Check kênh mỗi 1.5 giây (An toàn cho Render, không bị Telegram chặn)
-const USE_RSS = true; // Dùng RSS Telegram thay vì cào HTML (Nhanh gấp 3 lần)
+const DEFAULT_REGEX = '[A-Z0-9]{6,12}'; 
+const FAST_POLL_MS = 1000; // Quét cực nhanh mỗi 1 giây
+const FETCH_TIMEOUT_MS = 5000; // Cắt mạng nếu quá 5s
 
 // ==================== STATE ====================
 const S = {
@@ -76,13 +75,26 @@ const md5 = s => crypto.createHash('md5').update(s, 'utf8').digest('hex');
 const hashPass = p => /^[0-9a-fA-F]{32}$/.test(p) ? p.toLowerCase() : md5(p);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    clearTimeout(id);
+    return response;
+  } catch (error) {
+    clearTimeout(id);
+    throw error;
+  }
+}
+
 async function http(url, { method = 'GET', headers = {}, body } = {}) {
   const opts = { method, headers: { ...headers } };
   if (body !== undefined) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = body;
   }
-  const r = await fetch(url, opts);
+  const r = await fetchWithTimeout(url, opts);
   const text = await r.text();
   let json = null;
   try { json = JSON.parse(text); } catch (_) {}
@@ -94,7 +106,7 @@ function cleanMsg(m0) {
   const mm = /"message":"([^"]*)"/.exec(m);
   if (mm) m = mm[1];
   m = m.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
-  if (/h[^ ]?t h[^ ]?n|qu[^ ]? ?t[^ ]?ng.*h[^ ]?p l[^ ]?/.test(m)) return 'Ma qua tang khong hop le hoac da het han';
+  if (/h[^ ]?t h[^ ]?n|qu[^ ]? ?t[^ ]?ng.*h[^ ]?p l[^ ]?/.test(m)) return 'Mã không hợp lệ/đã dùng';
   return m;
 }
 
@@ -125,23 +137,38 @@ async function loginOne(acc) {
     acc.loggedIn = true; acc.at = at; acc.jwt = lob.json.token; acc.lastError = '';
     return true;
   } catch (e) {
-    acc.loggedIn = false; acc.lastError = 'HTTP error'; return false;
+    acc.loggedIn = false; acc.lastError = 'Lỗi mạng'; return false;
   }
 }
 
-// Gửi API đồng loạt (Tối ưu tốc độ)
+// --- HÀM REDEEM CÓ TỰ ĐỘNG LOGIN LẠI (CHỐNG HẾT TOKEN) ---
 async function redeemOne(acc, code) {
   if (!acc.loggedIn) return { user: acc.username, ok: false, msg: 'chua login' };
   try {
-    const r = await http(API_REDEEM + '?cp=R&cl=R&pf=web&at=' + acc.at, {
+    // Gửi request lần 1
+    let r = await http(API_REDEEM + '?cp=R&cl=R&pf=web&at=' + acc.at, {
       method: 'POST',
       headers: { Authorization: 'Bearer ' + acc.jwt, Origin: ORIGIN, Referer: ORIGIN + '/' },
       body: JSON.stringify({ code }),
     });
+    
+    // Nếu thất bại (hoặc mã 401 - Hết hạn token), thử login lại ngay lập tức
+    if (r.status === 401 || (r.json && r.json.errorCode === 401) || r.status >= 500) {
+        const success = await loginOne(acc); // Login lại
+        if(success) {
+            // Gửi lại request lần 2 với token mới
+            r = await http(API_REDEEM + '?cp=R&cl=R&pf=web&at=' + acc.at, {
+              method: 'POST',
+              headers: { Authorization: 'Bearer ' + acc.jwt, Origin: ORIGIN, Referer: ORIGIN + '/' },
+              body: JSON.stringify({ code }),
+            });
+        }
+    }
+
     if (r.status >= 400) return { user: acc.username, ok: false, msg: cleanMsg(r.text) };
     return { user: acc.username, ok: true, msg: cleanMsg(r.text) };
   } catch (e) {
-    return { user: acc.username, ok: false, msg: 'HTTP error' };
+    return { user: acc.username, ok: false, msg: 'Lỗi mạng' };
   }
 }
 
@@ -161,7 +188,6 @@ async function redeemAll(code) {
   const startT = Date.now();
   log('BẮT ĐẦU ĐỔI MÃ: ' + code);
   
-  // Bắn API song song không chờ đợi
   const results = await Promise.all(list.map(a => redeemOne(a, code)));
   const ok = results.filter(r => r.ok).length;
   const fail = results.length - ok;
@@ -179,47 +205,37 @@ async function getCodes(channel, rxStr) {
   const rx = new RegExp(rxStr);
   const out = [];
   
-  if (USE_RSS) {
-    // Dùng RSS (Nhanh hơn, ít bị chặn)
-    try {
-      const r = await fetch('https://rsshub.app/telegram/channel/' + channel);
-      const xml = await r.text();
-      const items = xml.split('<item>');
-      for (const item of items) {
-        const m = item.match(/<title>(.*?)<\/title>/s);
-        if (m) {
-          const txt = m[1];
-          const codes = txt.match(new RegExp('\\b' + rxStr + '\\b', 'g'));
-          if (codes) for (const c of codes) out.push({ time: Date.now(), code: c });
-        }
+  // Dùng RSS (Tốc độ ánh sáng, không cần parse HTML)
+  try {
+    const r = await fetchWithTimeout('https://rsshub.app/telegram/channel/' + channel);
+    const xml = await r.text();
+    const items = xml.split('<item>');
+    for (const item of items) {
+      const m = item.match(/<title>(.*?)<\/title>/s);
+      if (m) {
+        const txt = m[1];
+        const codes = txt.match(new RegExp('\\b' + rxStr + '\\b', 'g'));
+        if (codes) for (const c of codes) out.push({ time: Date.now(), code: c });
       }
-    } catch (_) {}
-  }
-  
-  // Fallback: Cào HTML nếu RSS lỗi
+    }
+  } catch (_) {}
+
+  // Fallback HTML
   if (out.length === 0) {
     try {
-      const r = await fetch('https://t.me/s/' + channel, { headers: { 'User-Agent': UA } });
+      const r = await fetchWithTimeout('https://t.me/s/' + channel, { headers: { 'User-Agent': UA } });
       const html = await r.text();
       const segs = html.split('<div class="tgme_widget_message_wrap');
       for (const s of segs) {
-        const tm = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
+        const tmStr = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
+        const tmMs = tmStr ? new Date(tmStr).getTime() : Date.now();
         for (const x of s.matchAll(/<code>([A-Z0-9]+)<\/code>/g))
-          if (rx.test(x[1])) out.push({ time: tm, code: x[1] });
-      }
-      if (!out.length) {
-        for (const s of segs) {
-          const tm = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
-          const t = (s.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)<\/div>/s) || [])[1] || '';
-          const txt = t.replace(/<[^>]+>/g, ' ');
-          for (const x of String(txt).matchAll(new RegExp('\\b' + rxStr + '\\b', 'g')))
-            out.push({ time: tm, code: x[0] });
-        }
+          if (rx.test(x[1])) out.push({ time: tmMs, code: x[1] });
       }
     } catch (_) {}
   }
 
-  out.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
+  out.sort((a, b) => (b.time - a.time));
   return out;
 }
 
@@ -227,23 +243,24 @@ async function getCodes(channel, rxStr) {
 let watcherRunning = false;
 async function watcherLoop() {
   watcherRunning = true;
-  log('Watcher khoi dong (Tốc độ cao). Kenh: ' + DEFAULT_CHANNEL);
+  log('Watcher khoi dong (v4 - Tự động Login lại). Kenh: ' + DEFAULT_CHANNEL);
   if (S.accounts.length) await loginAll();
   
   while (true) {
     try {
       if (!S.paused) {
         const codes = await getCodes(DEFAULT_CHANNEL, DEFAULT_REGEX);
-        if (codes.length && codes[0].code !== S.lastCode) {
-          S.lastCode = codes[0].code;
-          log('PHÁT HIỆN CODE: ' + S.lastCode);
-          // Chạy ngầm việc đổi code để vòng lặp tiếp tục check
-          redeemAll(S.lastCode).catch(e => log('Loi redeem: ' + e.message));
+        if (codes.length) {
+          const newest = codes[0];
+          if (newest.code !== S.lastCode) {
+            S.lastCode = newest.code;
+            log('PHÁT HIỆN CODE: ' + S.lastCode);
+            redeemAll(S.lastCode).catch(e => log('Loi redeem: ' + e.message));
+          }
         }
       }
     } catch (e) { log('Watcher loi: ' + (e.message || e)); }
     
-    // Nghỉ 1.5 giây rồi check tiếp
     await sleep(FAST_POLL_MS);
   }
 }
