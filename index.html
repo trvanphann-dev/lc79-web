@@ -228,7 +228,7 @@ h2{font-size:15.5px;font-weight:700}
 
 <script>
 var $ = function (id) { return document.getElementById(id); };
-var myKey = '';
+var myKey = localStorage.getItem('lc79_key') || '';
 var isAdmin = false;
 var refreshTimer = null;
 var refreshGen = 0;
@@ -241,7 +241,6 @@ function esc(s) {
     return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
   });
 }
-// Chỉ ghi DOM khi nội dung đổi => không giật, không mất vị trí cuộn
 function setHTML(el, key, html) {
   if (lastSig[key] === html) return false;
   lastSig[key] = html;
@@ -281,7 +280,7 @@ function switchTab(type) {
   restartAnim(user ? $('formUser') : $('formAdmin'), 'form');
 }
 
-/* ---------- API CALL (giữ nguyên) ---------- */
+/* ---------- API CALL ---------- */
 async function api(url, method, body) {
   method = method || 'GET';
   var headers = { 'x-api-key': isAdmin ? 'ADMIN' : myKey };
@@ -292,7 +291,7 @@ async function api(url, method, body) {
   return j;
 }
 
-/* ---------- ĐĂNG NHẬP (giữ nguyên) ---------- */
+/* ---------- ĐĂNG NHẬP ---------- */
 async function loginUser() {
   var k = $('inpKey').value.trim().toUpperCase();
   if (!k) { shakeLogin(); return toast('Nhập Key trước!'); }
@@ -300,10 +299,12 @@ async function loginUser() {
   await withBusy($('btnLoginUser'), async function () {
     try {
       await api('/api/user/state');
+      localStorage.setItem('lc79_key', myKey); // Lưu lại để F5 không mất
       showView('userView');
       startRefresh(2000, refreshUser);
     } catch (e) {
       myKey = '';
+      localStorage.removeItem('lc79_key');
       shakeLogin();
       toast('Key không hợp lệ!');
     }
@@ -329,6 +330,7 @@ async function loginAdmin() {
 
 function logout() {
   myKey = ''; isAdmin = false;
+  localStorage.removeItem('lc79_key'); // Xóa key khi đăng xuất
   refreshGen++;
   clearTimeout(refreshTimer);
   lastSig = {};
@@ -343,7 +345,6 @@ function showView(viewId) {
   restartAnim(v, 'view');
 }
 
-/* Vòng làm mới: xong request mới hẹn lượt sau, tab ẩn thì tạm dừng */
 function startRefresh(ms, fn) {
   clearTimeout(refreshTimer);
   var gen = ++refreshGen;
@@ -359,13 +360,15 @@ document.addEventListener('visibilitychange', function () {
   if (!document.hidden && myKey && !isAdmin) startRefresh(2000, refreshUser);
 });
 
-/* ---------- DÀNH CHO USER (giữ nguyên logic) ---------- */
+/* ---------- DÀNH CHO USER ---------- */
 async function refreshUser(gen) {
   try {
     var res = await api('/api/user/state');
     if (gen !== refreshGen) return;
     var s = res.state;
-    var on = !!s.active;
+    
+    // Vì server tự động chạy ngầm nên trạng thái luôn là ĐANG BẬT nếu có acc
+    var on = s.active;
 
     setText($('txtUserKey'), 'Key: ' + myKey);
     setHTML($('userActive'), 'active',
@@ -389,8 +392,7 @@ async function refreshUser(gen) {
             '</div>' +
           '</div>' +
           '<div class="ab">' +
-            '<button type="button" class="btn ' + (on ? 'd' : 'g') + '" data-act="toggleTool">' + (on ? 'TẮT TOOL' : 'BẬT TOOL') + '</button>' +
-            '<button type="button" class="btn" data-act="delAcc">Xóa</button>' +
+            '<button type="button" class="btn d" data-act="delAcc">Xóa Acc</button>' +
           '</div>' +
         '</div>');
     } else {
@@ -435,16 +437,7 @@ async function delAcc(btn) {
   });
 }
 
-async function toggleTool(btn) {
-  await withBusy(btn, async function () {
-    try {
-      await api('/api/user/toggle', 'POST');
-      await refreshUser(refreshGen);
-    } catch (e) { toast(e.message); }
-  });
-}
-
-/* ---------- DÀNH CHO ADMIN (giữ nguyên logic) ---------- */
+/* ---------- DÀNH CHO ADMIN ---------- */
 async function loadAdminKeys() {
   try {
     var res = await api('/api/admin/keys');
@@ -492,7 +485,7 @@ function copyKey(k) {
   } else toast(k);
 }
 
-/* ---------- Một bộ lắng nghe sự kiện duy nhất (chạy ổn trên iPhone) ---------- */
+/* ---------- Sự kiện ---------- */
 document.addEventListener('click', function (e) {
   var el = e.target.closest ? e.target.closest('[data-act]') : null;
   if (!el) return;
@@ -504,7 +497,6 @@ document.addEventListener('click', function (e) {
   else if (act === 'logout') logout();
   else if (act === 'addAcc') addAcc();
   else if (act === 'delAcc') delAcc(el);
-  else if (act === 'toggleTool') toggleTool(el);
   else if (act === 'createKey') createKey();
   else if (act === 'delKey') delKey(k, el);
   else if (act === 'copyKey') copyKey(k);
@@ -518,17 +510,30 @@ document.addEventListener('keydown', function (e) {
   else if (id === 'accU' || id === 'accP') addAcc();
 });
 
-// Logo lỗi tải thì hiện chữ 79
 document.querySelectorAll('img[data-fallback]').forEach(function (img) {
   img.addEventListener('error', function () { img.replaceWith(document.createTextNode('79')); });
 });
-
-// Có lỗi JS thì báo ngay trên màn hình thay vì im lặng
 window.addEventListener('error', function (e) { toast('Lỗi: ' + (e.message || 'không xác định')); });
-window.addEventListener('unhandledrejection', function (e) { console.log(e.reason); });
 
-/* KHỞI ĐỘNG */
-showView('loginView');
+/* ---------- KHỞI ĐỘNG TỰ ĐỘNG ĐĂNG NHẬP ---------- */
+async function init() {
+  if (myKey) {
+    // Thử đăng nhập ngầm bằng Key đã lưu
+    try {
+      await api('/api/user/state');
+      showView('userView');
+      startRefresh(2000, refreshUser);
+    } catch (e) {
+      // Key cũ bị xoá hoặc sai -> Bắt đăng nhập lại
+      myKey = '';
+      localStorage.removeItem('lc79_key');
+      showView('loginView');
+    }
+  } else {
+    showView('loginView');
+  }
+}
+init();
 </script>
 </body>
 </html>
