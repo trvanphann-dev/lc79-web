@@ -20,20 +20,19 @@ if (!WEB_PASSWORD || WEB_PASSWORD.length < 12) {
   process.exit(1);
 }
 
+// ---- CẤU HÌNH MẶC ĐỊNH CỦA BẠN (ẨN KHỎI GIAO DIỆN) ----
 const ORIGIN = 'https://lc79b.bet';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
 const API_LOGIN = 'https://apifo88daigia.tele68.com/api';
 const API_LOBBY = 'https://wlb.tele68.com/v1/lobby/auth/login';
 const API_REDEEM = 'https://gameapi.tele68.com/v1/giftcode/redemption';
-const DEFAULT_CHANNEL = 'toolrdlc79test';
-const DEFAULT_REGEX = '[A-Z]{8,10}';
+const DEFAULT_CHANNEL = 'codelaucuagame'; // Kênh Telegram mặc định
+const DEFAULT_REGEX = '[A-Z]{8,10}';       // Định dạng code mặc định
+const DEFAULT_POLL = 5;                    // Chu kỳ delay mặc định (giây)
 
 // ==================== STATE ====================
 const S = {
   accounts: [],
-  channel: DEFAULT_CHANNEL,
-  regex: DEFAULT_REGEX,
-  pollSec: 5,
   paused: false,
   lastCode: '',
   startTime: Date.now(),
@@ -55,20 +54,17 @@ function loadData() {
         username: a.username, password: a.password,
         loggedIn: false, at: '', jwt: '', lastError: ''
       }));
-      if (d.channel) S.channel = d.channel;
-      if (d.regex) S.regex = d.regex;
-      if (typeof d.pollSec === 'number') S.pollSec = Math.max(1, d.pollSec);
-      log('Nap data: ' + S.accounts.length + ' acc, kenh ' + S.channel);
+      log('Nap data: ' + S.accounts.length + ' acc');
     }
   } catch (e) { log('loadData loi: ' + e.message); }
 }
+
 function saveData() {
   try {
     const dir = path.dirname(DATA_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(DATA_FILE, JSON.stringify({
-      accounts: S.accounts.map(a => ({ username: a.username, password: a.password })),
-      channel: S.channel, regex: S.regex, pollSec: S.pollSec
+      accounts: S.accounts.map(a => ({ username: a.username, password: a.password }))
     }, null, 2), 'utf8');
   } catch (e) { log('saveData loi: ' + e.message); }
 }
@@ -212,12 +208,12 @@ async function getCodes(channel, rxStr) {
 let watcherRunning = false;
 async function watcherLoop() {
   watcherRunning = true;
-  log('Watcher khoi dong. Kenh: ' + S.channel);
+  log('Watcher khoi dong. Kenh: ' + DEFAULT_CHANNEL);
   if (S.accounts.length) await loginAll();
   while (true) {
     try {
       if (!S.paused) {
-        const codes = await getCodes(S.channel, S.regex);
+        const codes = await getCodes(DEFAULT_CHANNEL, DEFAULT_REGEX);
         if (codes.length && codes[0].code !== S.lastCode) {
           S.lastCode = codes[0].code;
           log('CODE MOI: ' + S.lastCode + (codes[0].time ? ' (' + codes[0].time + ')' : ''));
@@ -225,7 +221,7 @@ async function watcherLoop() {
         }
       }
     } catch (e) { log('Watcher loi: ' + (e.message || e)); }
-    await sleep(Math.max(1, S.pollSec) * 1000);
+    await sleep(DEFAULT_POLL * 1000);
   }
 }
 
@@ -238,7 +234,7 @@ const SESSION_TTL = 12 * 60 * 60 * 1000;
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: { directives: {
   defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'"],
-  styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'data:'],
+  styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'data:', 'https://lc79.games'],
   connectSrc: ["'self'"], upgradeInsecureRequests: null
 } } }));
 app.use(express.json({ limit: '256kb' }));
@@ -268,14 +264,11 @@ function publicState() {
   return {
     running: watcherRunning,
     paused: S.paused,
-    channel: S.channel,
-    regex: S.regex,
     lastCode: S.lastCode,
     uptimeMinutes: Math.round((Date.now() - S.startTime) / 6000) / 10,
     totalAccounts: S.accounts.length,
     loggedIn: S.accounts.filter(a => a.loggedIn).length,
     accounts: S.accounts.map(a => ({ username: a.username, loggedIn: a.loggedIn, lastError: a.lastError || '' })),
-    pollSec: S.pollSec,
     logs: S.logs.slice(0, 80),
     dataFile: DATA_FILE,
   };
@@ -358,36 +351,12 @@ app.post('/api/control', requireAuth, apiLimiter, (req, res) => {
   res.json({ ok: true, state: publicState() });
 });
 
-// ---- CONFIG ----
-app.post('/api/config', requireAuth, apiLimiter, (req, res) => {
-  const b = req.body || {};
-  if (b.channel !== undefined) {
-    const ch = String(b.channel).replace(/^@/, '').trim();
-    if (!/^[A-Za-z0-9_]{3,32}$/.test(ch)) return res.status(400).json({ ok: false, error: 'Ten kenh khong hop le.' });
-    S.channel = ch;
-  }
-  if (b.regex !== undefined) {
-    const rx = String(b.regex).trim();
-    if (rx) { try { new RegExp(rx); } catch (e) { return res.status(400).json({ ok: false, error: 'Regex khong hop le.' }); } }
-    S.regex = rx || DEFAULT_REGEX;
-  }
-  if (b.pollSec !== undefined) {
-    const ps = parseInt(b.pollSec, 10);
-    if (!Number.isFinite(ps) || ps < 1 || ps > 300) return res.status(400).json({ ok: false, error: 'pollSec 1-300.' });
-    S.pollSec = ps;
-  }
-  saveData();
-  log('Config: channel=' + S.channel + ' pollSec=' + S.pollSec);
-  res.json({ ok: true, state: publicState() });
-});
-
 // ---- EXPORT / IMPORT ----
 app.get('/api/export', requireAuth, apiLimiter, (req, res) => {
   res.setHeader('Content-Disposition', 'attachment; filename="lc79-accounts.json"');
   res.json({
     exportedAt: new Date().toISOString(),
-    accounts: S.accounts.map(a => ({ username: a.username, password: a.password })),
-    channel: S.channel, regex: S.regex, pollSec: S.pollSec
+    accounts: S.accounts.map(a => ({ username: a.username, password: a.password }))
   });
 });
 
@@ -403,9 +372,6 @@ app.post('/api/import', requireAuth, apiLimiter, (req, res) => {
     S.accounts.push({ username: u, password: hashPass(p), loggedIn: false, at: '', jwt: '', lastError: '' });
     added++;
   }
-  if (b.channel) S.channel = String(b.channel).replace(/^@/, '').trim();
-  if (b.regex) S.regex = String(b.regex).trim();
-  if (typeof b.pollSec === 'number') S.pollSec = Math.max(1, b.pollSec);
   saveData();
   log('Import: +' + added + ' acc, skip ' + skipped);
   Promise.all(S.accounts.filter(a => !a.loggedIn).map(loginOne)).then(() => saveData()).catch(() => {});
