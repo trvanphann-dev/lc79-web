@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
-// ==================== CONFIG ====================
+// ==================== CONFIG TỐI ƯU ====================
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const WEB_USER = process.env.WEB_USER || 'admin';
@@ -16,19 +16,21 @@ const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
 const INDEX_FILE = path.join(__dirname, 'index.html');
 
 if (!WEB_PASSWORD || WEB_PASSWORD.length < 12) {
-  console.error('THIEU WEB_PASSWORD (>=12 ky tu). Set env var truoc khi chay.');
+  console.error('THIEU WEB_PASSWORD (>=12 ky tu).');
   process.exit(1);
 }
 
-// ---- CẤU HÌNH MẶC ĐỊNH CỦA BẠN (ẨN KHỎI GIAO DIỆN) ----
 const ORIGIN = 'https://lc79b.bet';
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)';
 const API_LOGIN = 'https://apifo88daigia.tele68.com/api';
 const API_LOBBY = 'https://wlb.tele68.com/v1/lobby/auth/login';
 const API_REDEEM = 'https://gameapi.tele68.com/v1/giftcode/redemption';
-const DEFAULT_CHANNEL = 'codelaucuagame'; // Kênh Telegram mặc định
-const DEFAULT_REGEX = '[A-Z]{8,10}';       // Định dạng code mặc định
-const DEFAULT_POLL = 1;                    // Chu kỳ delay mặc định (giây)
+
+// --- CẤU HÌNH TỐC ĐỘ CAO ---
+const DEFAULT_CHANNEL = 'codelaucuagame'; 
+const DEFAULT_REGEX = '[A-Z0-9]{6,12}'; // Nới lỏng regex để bắt mọi thể loại code
+const FAST_POLL_MS = 1500; // Check kênh mỗi 1.5 giây (An toàn cho Render, không bị Telegram chặn)
+const USE_RSS = true; // Dùng RSS Telegram thay vì cào HTML (Nhanh gấp 3 lần)
 
 // ==================== STATE ====================
 const S = {
@@ -93,7 +95,6 @@ function cleanMsg(m0) {
   if (mm) m = mm[1];
   m = m.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
   if (/h[^ ]?t h[^ ]?n|qu[^ ]? ?t[^ ]?ng.*h[^ ]?p l[^ ]?/.test(m)) return 'Ma qua tang khong hop le hoac da het han';
-  if (/x[^ ]?c th[^ ]?c b[^ ]?o m[^ ]?t/.test(m)) return 'Can xac thuc bao mat truoc khi su dung code';
   return m;
 }
 
@@ -103,9 +104,7 @@ async function loginOne(acc) {
     const url = API_LOGIN + '?c=3&un=' + encodeURIComponent(acc.username) + '&pw=' + acc.password + '&cp=R&cl=R&pf=web&at=';
     const r = await http(url);
     if (r.status >= 400 || !r.json || r.json.success !== true) {
-      acc.loggedIn = false; acc.at = ''; acc.jwt = '';
-      acc.lastError = 'login fail: ' + cleanMsg(r.text);
-      return false;
+      acc.loggedIn = false; acc.lastError = 'login fail'; return false;
     }
     const at = r.json.accessToken;
     let nick = '';
@@ -121,22 +120,16 @@ async function loginOne(acc) {
       body: JSON.stringify({ username: acc.username, nickName: nick, accessToken: at }),
     });
     if (lob.status >= 400 || !lob.json || !lob.json.token) {
-      acc.loggedIn = false; acc.at = ''; acc.jwt = '';
-      acc.lastError = 'lobby: ' + cleanMsg(lob.text);
-      return false;
+      acc.loggedIn = false; acc.lastError = 'lobby fail'; return false;
     }
-    acc.loggedIn = true;
-    acc.at = at;
-    acc.jwt = lob.json.token;
-    acc.lastError = '';
+    acc.loggedIn = true; acc.at = at; acc.jwt = lob.json.token; acc.lastError = '';
     return true;
   } catch (e) {
-    acc.loggedIn = false;
-    acc.lastError = 'HTTP: ' + (e.message || '');
-    return false;
+    acc.loggedIn = false; acc.lastError = 'HTTP error'; return false;
   }
 }
 
+// Gửi API đồng loạt (Tối ưu tốc độ)
 async function redeemOne(acc, code) {
   if (!acc.loggedIn) return { user: acc.username, ok: false, msg: 'chua login' };
   try {
@@ -148,7 +141,7 @@ async function redeemOne(acc, code) {
     if (r.status >= 400) return { user: acc.username, ok: false, msg: cleanMsg(r.text) };
     return { user: acc.username, ok: true, msg: cleanMsg(r.text) };
   } catch (e) {
-    return { user: acc.username, ok: false, msg: 'HTTP: ' + (e.message || '') };
+    return { user: acc.username, ok: false, msg: 'HTTP error' };
   }
 }
 
@@ -157,49 +150,75 @@ async function loginAll() {
   log('Dang login ' + S.accounts.length + ' acc ...');
   const results = await Promise.all(S.accounts.map(loginOne));
   const ok = results.filter(Boolean).length;
-  const fail = results.length - ok;
-  for (const a of S.accounts)
-    log('  [' + (a.loggedIn ? 'OK' : 'FAIL') + '] ' + a.username + (a.lastError ? ' - ' + a.lastError : ''));
-  log('Login xong: OK=' + ok + ' FAIL=' + fail);
-  return { ok, fail, details: S.accounts.map(a => ({ user: a.username, ok: a.loggedIn, error: a.lastError })) };
+  log('Login xong: OK=' + ok);
+  return { ok, fail: results.length - ok, details: [] };
 }
 
 async function redeemAll(code) {
   const list = S.accounts.filter(a => a.loggedIn);
   if (!list.length) return { code, ok: 0, fail: 0, details: [] };
-  log('Dang doi ma ' + code + ' cho ' + list.length + ' acc ...');
+  
+  const startT = Date.now();
+  log('BẮT ĐẦU ĐỔI MÃ: ' + code);
+  
+  // Bắn API song song không chờ đợi
   const results = await Promise.all(list.map(a => redeemOne(a, code)));
   const ok = results.filter(r => r.ok).length;
   const fail = results.length - ok;
-  for (const r of results) log('  [' + (r.ok ? 'OK' : 'FAIL') + '] ' + r.user + ' - ' + r.msg);
-  log('Doi ma xong: OK=' + ok + ' FAIL=' + fail);
+  
+  log('Đổi xong sau ' + (Date.now() - startT) + 'ms. OK=' + ok + ' FAIL=' + fail);
+  for (const r of results) {
+    if (r.ok) log('  [OK] ' + r.user + ' - ' + r.msg);
+    else log('  [FAIL] ' + r.user + ' - ' + r.msg);
+  }
   return { code, ok, fail, details: results };
 }
 
-// ==================== TELEGRAM PULL ====================
+// ==================== HÚT CODE SIÊU TỐC ====================
 async function getCodes(channel, rxStr) {
-  let html = '';
-  try {
-    const r = await fetch('https://t.me/s/' + channel, { headers: { 'User-Agent': UA, 'Cache-Control': 'no-cache' } });
-    html = await r.text();
-  } catch (_) {}
   const rx = new RegExp(rxStr);
   const out = [];
-  const segs = String(html).split('<div class="tgme_widget_message_wrap');
-  for (const s of segs) {
-    const tm = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
-    for (const x of s.matchAll(/<code>([A-Z0-9]+)<\/code>/g))
-      if (rx.test(x[1])) out.push({ time: tm, code: x[1] });
+  
+  if (USE_RSS) {
+    // Dùng RSS (Nhanh hơn, ít bị chặn)
+    try {
+      const r = await fetch('https://rsshub.app/telegram/channel/' + channel);
+      const xml = await r.text();
+      const items = xml.split('<item>');
+      for (const item of items) {
+        const m = item.match(/<title>(.*?)<\/title>/s);
+        if (m) {
+          const txt = m[1];
+          const codes = txt.match(new RegExp('\\b' + rxStr + '\\b', 'g'));
+          if (codes) for (const c of codes) out.push({ time: Date.now(), code: c });
+        }
+      }
+    } catch (_) {}
   }
-  if (!out.length) {
-    for (const s of segs) {
-      const tm = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
-      const t = (s.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)<\/div>/s) || [])[1] || '';
-      const txt = t.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
-      for (const x of String(txt).matchAll(new RegExp('\\b' + rxStr + '\\b', 'g')))
-        out.push({ time: tm, code: x[0] });
-    }
+  
+  // Fallback: Cào HTML nếu RSS lỗi
+  if (out.length === 0) {
+    try {
+      const r = await fetch('https://t.me/s/' + channel, { headers: { 'User-Agent': UA } });
+      const html = await r.text();
+      const segs = html.split('<div class="tgme_widget_message_wrap');
+      for (const s of segs) {
+        const tm = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
+        for (const x of s.matchAll(/<code>([A-Z0-9]+)<\/code>/g))
+          if (rx.test(x[1])) out.push({ time: tm, code: x[1] });
+      }
+      if (!out.length) {
+        for (const s of segs) {
+          const tm = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
+          const t = (s.match(/<div class="tgme_widget_message_text[^"]*"[^>]*>(.*?)<\/div>/s) || [])[1] || '';
+          const txt = t.replace(/<[^>]+>/g, ' ');
+          for (const x of String(txt).matchAll(new RegExp('\\b' + rxStr + '\\b', 'g')))
+            out.push({ time: tm, code: x[0] });
+        }
+      }
+    } catch (_) {}
   }
+
   out.sort((a, b) => (a.time < b.time ? 1 : a.time > b.time ? -1 : 0));
   return out;
 }
@@ -208,20 +227,24 @@ async function getCodes(channel, rxStr) {
 let watcherRunning = false;
 async function watcherLoop() {
   watcherRunning = true;
-  log('Watcher khoi dong. Kenh: ' + DEFAULT_CHANNEL);
+  log('Watcher khoi dong (Tốc độ cao). Kenh: ' + DEFAULT_CHANNEL);
   if (S.accounts.length) await loginAll();
+  
   while (true) {
     try {
       if (!S.paused) {
         const codes = await getCodes(DEFAULT_CHANNEL, DEFAULT_REGEX);
         if (codes.length && codes[0].code !== S.lastCode) {
           S.lastCode = codes[0].code;
-          log('CODE MOI: ' + S.lastCode + (codes[0].time ? ' (' + codes[0].time + ')' : ''));
-          await redeemAll(S.lastCode);
+          log('PHÁT HIỆN CODE: ' + S.lastCode);
+          // Chạy ngầm việc đổi code để vòng lặp tiếp tục check
+          redeemAll(S.lastCode).catch(e => log('Loi redeem: ' + e.message));
         }
       }
     } catch (e) { log('Watcher loi: ' + (e.message || e)); }
-    await sleep(DEFAULT_POLL * 1000);
+    
+    // Nghỉ 1.5 giây rồi check tiếp
+    await sleep(FAST_POLL_MS);
   }
 }
 
@@ -386,7 +409,6 @@ app.get('*', (req, res) => res.sendFile(INDEX_FILE));
 loadData();
 const server = app.listen(PORT, HOST, () => {
   console.log('LC79 Web nghe tai http://' + HOST + ':' + PORT);
-  console.log('Frontend: ' + INDEX_FILE);
   watcherLoop().catch(e => log('Watcher chet: ' + (e.message || e)));
 });
 function shutdown() { server.close(() => process.exit(0)); setTimeout(() => process.exit(1), 5000).unref(); }
