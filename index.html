@@ -74,9 +74,9 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 4px rgba(79,140,255,.16);b
 /* Đăng nhập */
 .login{max-width:410px;margin:9vh auto 0;padding:26px}
 .tabs{position:relative;display:grid;grid-template-columns:1fr 1fr;background:#080d18;border:1px solid var(--line);border-radius:13px;padding:4px;margin:22px 0 4px}
-.tabs .ind{position:absolute;top:4px;bottom:4px;left:4px;width:calc(50% - 4px);border-radius:10px;background:linear-gradient(135deg,var(--blue2),var(--blue));box-shadow:0 6px 16px -6px rgba(79,140,255,.8);transition:transform .35s var(--ease)}
+.tabs .ind{pointer-events:none;position:absolute;top:4px;bottom:4px;left:4px;width:calc(50% - 4px);border-radius:10px;background:linear-gradient(135deg,var(--blue2),var(--blue));box-shadow:0 6px 16px -6px rgba(79,140,255,.8);transition:transform .35s var(--ease)}
 .tabs[data-t="admin"] .ind{transform:translateX(100%)}
-.tab{position:relative;z-index:1;text-align:center;padding:10px;border-radius:10px;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer;transition:color .25s}
+.tab{-webkit-appearance:none;appearance:none;border:0;background:none;font-family:inherit;touch-action:manipulation;cursor:pointer;position:relative;z-index:2;text-align:center;padding:10px;border-radius:10px;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer;transition:color .25s}
 .tab.on{color:#fff}
 .formfade{animation:fadeIn .3s var(--ease) both}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -135,8 +135,8 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 4px rgba(79,140,255,.16);b
     </div>
     <div class="tabs" id="tabs" data-t="user" role="tablist">
       <div class="ind"></div>
-      <div class="tab on" id="tabUser" role="tab" tabindex="0" onclick="switchTab('user')">Người Dùng</div>
-      <div class="tab" id="tabAdmin" role="tab" tabindex="0" onclick="switchTab('admin')">Admin</div>
+      <button type="button" class="tab on" id="tabUser" role="tab" data-tab="user">Người Dùng</button>
+      <button type="button" class="tab" id="tabAdmin" role="tab" data-tab="admin">Admin</button>
     </div>
 
     <!-- Form Khách -->
@@ -509,9 +509,12 @@ document.addEventListener('keydown', e => {
     else if (id === 'inpAdminPass') loginAdmin();
     else if (id === 'accU' || id === 'accP') addAcc();
   }
-  if ((e.key === 'Enter' || e.key === ' ') && document.activeElement && document.activeElement.classList.contains('tab')) {
-    e.preventDefault(); document.activeElement.click();
-  }
+});
+
+// Chuyển tab đăng nhập (gắn sự kiện trực tiếp, chạy tốt trên iPhone)
+$('tabs').addEventListener('click', e => {
+  const t = e.target.closest('[data-tab]');
+  if (t) switchTab(t.dataset.tab);
 });
 
 // KHỞI ĐỘNG
