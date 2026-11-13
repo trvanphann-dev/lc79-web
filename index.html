@@ -2,98 +2,159 @@
 <html lang="vi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="theme-color" content="#0a0f1c">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#070b14">
 <title>LC79 Auto - Hệ thống đa người dùng</title>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  --bg-0:#060910; --panel:rgba(18,26,42,.85); --line:rgba(120,150,200,.15);
-  --text:#f0f4f8; --muted:#8a9eb5; --blue:#3b82f6; --green:#10b981; --red:#ef4444;
-  --radius:16px;
+  --bg:#070b14; --panel:#0f1626; --panel2:#141d31; --line:rgba(130,160,210,.14); --line2:rgba(130,160,210,.26);
+  --text:#eef3fa; --muted:#8497b2; --blue:#4f8cff; --blue2:#2f6bff; --green:#22d3a0; --red:#ff5c6c; --amber:#f5b942;
+  --r:16px; --ease:cubic-bezier(.22,.8,.3,1);
 }
 html,body{height:100%}
-body{font:15px/1.55 "Inter",system-ui,sans-serif;color:var(--text);background:var(--bg-0);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased}
-body::before{content:"";position:fixed;inset:0;z-index:-1;background:radial-gradient(circle at 15% 15%,rgba(59,130,246,.15),transparent 35%),radial-gradient(circle at 85% 85%,rgba(16,185,129,.1),transparent 35%);pointer-events:none}
+body{font:15px/1.55 "Inter","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;color:var(--text);background:var(--bg);min-height:100vh;overflow-x:hidden;-webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
 
-.wrap{width:min(850px,100%);margin-inline:auto;padding:24px 14px}
-.top{display:flex;justify-content:space-between;align-items:center;margin-bottom:24px}
-.brand{display:flex;align-items:center;gap:14px}
-.logo-box{width:52px;height:52px;border-radius:14px;flex:none;background:#111a2c;border:1px solid var(--line);display:grid;place-items:center;box-shadow:0 8px 20px -5px rgba(59,130,246,.4);overflow:hidden}
+/* Nền động nhẹ (chỉ dùng transform => không gây giật) */
+.bg{position:fixed;inset:0;z-index:-1;overflow:hidden;pointer-events:none}
+.bg i{position:absolute;border-radius:50%;filter:blur(90px);opacity:.5;will-change:transform}
+.bg i:nth-child(1){width:520px;height:520px;left:-140px;top:-120px;background:#1d4ed8;animation:drift1 22s ease-in-out infinite alternate}
+.bg i:nth-child(2){width:460px;height:460px;right:-120px;bottom:-100px;background:#0f9b78;opacity:.38;animation:drift2 26s ease-in-out infinite alternate}
+.bg::after{content:"";position:absolute;inset:0;background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);background-size:48px 48px;opacity:.35;-webkit-mask-image:radial-gradient(ellipse at 50% 30%,#000 10%,transparent 70%);mask-image:radial-gradient(ellipse at 50% 30%,#000 10%,transparent 70%)}
+@keyframes drift1{to{transform:translate3d(120px,90px,0)}}
+@keyframes drift2{to{transform:translate3d(-110px,-80px,0)}}
+
+.wrap{width:min(880px,100%);margin-inline:auto;padding:calc(22px + env(safe-area-inset-top)) 14px calc(30px + env(safe-area-inset-bottom))}
+.view{animation:viewIn .45s var(--ease) both}
+@keyframes viewIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+
+.top{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:22px}
+.brand{display:flex;align-items:center;gap:14px;min-width:0}
+.logo-box{width:50px;height:50px;border-radius:14px;flex:none;background:linear-gradient(145deg,#16223a,#0c1424);border:1px solid var(--line2);display:grid;place-items:center;overflow:hidden;font-weight:800;color:var(--blue);box-shadow:0 0 0 4px rgba(79,140,255,.08),0 10px 26px -8px rgba(79,140,255,.55)}
 .logo-box img{width:100%;height:100%;object-fit:cover}
-h1{font-size:20px;font-weight:800}
-.sub{font-size:12.5px;color:var(--muted)}
+h1{font-size:20px;font-weight:800;letter-spacing:-.01em;line-height:1.2}
+h2{font-size:16px;font-weight:700;letter-spacing:-.005em}
+.sub{font-size:12.5px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-.card,.panel{background:var(--panel);backdrop-filter:blur(20px);border:1px solid var(--line);border-radius:var(--radius);box-shadow:0 4px 24px -8px rgba(0,0,0,.5);position:relative}
-.panel{padding:22px}.card{padding:16px 18px}
-.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:20px}
-.metric{font-size:22px;font-weight:800;margin-top:6px;color:#fff}
+.card,.panel{background:linear-gradient(180deg,var(--panel2),var(--panel));border:1px solid var(--line);border-radius:var(--r);box-shadow:0 14px 34px -18px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.04);position:relative}
+.panel{padding:22px;margin-bottom:18px}
+.card{padding:16px 18px;overflow:hidden}
+.card::before{content:"";position:absolute;left:0;top:14px;bottom:14px;width:3px;border-radius:0 3px 3px 0;background:var(--accent,var(--blue))}
+.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;margin-bottom:18px}
 .card .lbl{font-size:12.5px;color:var(--muted);font-weight:600}
+.metric{font-size:22px;font-weight:800;margin-top:6px;display:flex;align-items:center;gap:10px;min-height:33px;font-variant-numeric:tabular-nums;word-break:break-all}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--c,var(--muted));flex:none;position:relative}
+.dot.live::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--c);animation:ping 1.6s ease-out infinite}
+@keyframes ping{from{transform:scale(1);opacity:.7}to{transform:scale(3);opacity:0}}
+.on-t{color:var(--green)}.off-t{color:var(--red)}
 
-.btn{display:inline-flex;align-items:center;justify-content:center;padding:11px 16px;border-radius:11px;border:1px solid var(--line);background:rgba(255,255,255,.04);color:var(--text);font:inherit;font-weight:600;font-size:14px;cursor:pointer;transition:all .2s}
-.btn:hover{background:rgba(255,255,255,.08)}
-.btn:disabled{opacity:.5;cursor:not-allowed}
-.btn.primary{background:linear-gradient(135deg,#2563eb,#3b82f6);border:none;color:#fff;box-shadow:0 4px 15px -3px rgba(59,130,246,.6)}
-.btn.success{background:linear-gradient(135deg,#059669,#10b981);border:none;color:#fff;box-shadow:0 4px 15px -3px rgba(16,185,129,.4)}
-.btn.danger{background:linear-gradient(135deg,#dc2626,#ef4444);border:none;color:#fff;box-shadow:0 4px 15px -3px rgba(239,68,68,.4)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:11px 18px;border-radius:12px;border:1px solid var(--line2);background:rgba(255,255,255,.04);color:var(--text);font:inherit;font-weight:600;font-size:14px;cursor:pointer;transition:transform .18s var(--ease),background .2s,box-shadow .2s,filter .2s;position:relative;overflow:hidden;user-select:none;touch-action:manipulation}
+.btn:hover{background:rgba(255,255,255,.08);transform:translateY(-1px)}
+.btn:active{transform:translateY(0) scale(.97)}
+.btn:focus-visible,input:focus-visible,.tab:focus-visible{outline:2px solid var(--blue);outline-offset:2px}
+.btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
+.btn.primary{background:linear-gradient(135deg,var(--blue2),var(--blue));border-color:transparent;color:#fff;box-shadow:0 8px 22px -8px rgba(79,140,255,.8)}
+.btn.success{background:linear-gradient(135deg,#0ea57a,var(--green));border-color:transparent;color:#05261d;box-shadow:0 8px 22px -8px rgba(34,211,160,.6)}
+.btn.danger{background:linear-gradient(135deg,#e23a4c,var(--red));border-color:transparent;color:#fff;box-shadow:0 8px 22px -8px rgba(255,92,108,.6)}
+.btn.primary:hover,.btn.success:hover,.btn.danger:hover{filter:brightness(1.1)}
 .btn.w100{width:100%}
+.btn.sm{padding:7px 12px;font-size:12.5px;border-radius:10px}
+.btn.busy{pointer-events:none}
+.btn.busy::after{content:"";width:14px;height:14px;border-radius:50%;border:2px solid currentColor;border-right-color:transparent;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.ripple{position:absolute;border-radius:50%;background:rgba(255,255,255,.35);transform:scale(0);animation:rip .55s ease-out forwards;pointer-events:none}
+@keyframes rip{to{transform:scale(4);opacity:0}}
 
 .field{display:flex;flex-direction:column;gap:8px;margin:16px 0}
 .field label{color:var(--muted);font-size:13px;font-weight:600}
-input{width:100%;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:rgba(0,0,0,.3);color:var(--text);font:inherit;outline:none;transition:all .2s}
-input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.2)}
+input{width:100%;padding:12px 14px;border-radius:12px;border:1px solid var(--line);background:#080d18;color:var(--text);font:inherit;outline:none;transition:border-color .2s,box-shadow .2s,background .2s}
+input::placeholder{color:#55677f}
+input:focus{border-color:var(--blue);box-shadow:0 0 0 4px rgba(79,140,255,.16);background:#0a1120}
 
-.tabs{display:flex;gap:4px;background:rgba(0,0,0,.5);border:1px solid var(--line);border-radius:12px;padding:4px;margin-bottom:20px}
-.tab{flex:1;text-align:center;padding:10px;border-radius:8px;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer;transition:all .2s}
-.tab.on{background:var(--blue);color:#fff;box-shadow:0 2px 10px -2px rgba(59,130,246,.5)}
+/* Đăng nhập */
+.login{max-width:410px;margin:9vh auto 0;padding:26px}
+.tabs{position:relative;display:grid;grid-template-columns:1fr 1fr;background:#080d18;border:1px solid var(--line);border-radius:13px;padding:4px;margin:22px 0 4px}
+.tabs .ind{position:absolute;top:4px;bottom:4px;left:4px;width:calc(50% - 4px);border-radius:10px;background:linear-gradient(135deg,var(--blue2),var(--blue));box-shadow:0 6px 16px -6px rgba(79,140,255,.8);transition:transform .35s var(--ease)}
+.tabs[data-t="admin"] .ind{transform:translateX(100%)}
+.tab{position:relative;z-index:1;text-align:center;padding:10px;border-radius:10px;font-size:14px;font-weight:700;color:var(--muted);cursor:pointer;transition:color .25s}
+.tab.on{color:#fff}
+.formfade{animation:fadeIn .3s var(--ease) both}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.shake{animation:shake .4s}
+@keyframes shake{20%,60%{transform:translateX(-7px)}40%,80%{transform:translateX(7px)}}
 
-.result{white-space:pre-wrap;background:#04070d;border:1px solid var(--line);padding:14px;border-radius:12px;font-family:monospace;font-size:12px;height:300px;overflow-y:auto;color:#94a3b8}
-.result .ok{color:#34d399}
-.result .fail{color:#f87171}
-.result .sys{color:#60a5fa}
+.row{display:flex;gap:10px;flex-wrap:wrap}
+.row input{flex:1;min-width:150px}
 
-.acc-box{display:flex;align-items:center;justify-content:space-between;background:rgba(255,255,255,.03);padding:14px;border-radius:12px;margin-bottom:12px;border:1px solid var(--line)}
-.acc-name{font-weight:800;font-size:15px}
-.badge{padding:4px 10px;border-radius:20px;font-size:11px;font-weight:700}
-.badge.ok{background:rgba(16,185,129,.15);color:#34d399}
-.badge.err{background:rgba(239,68,68,.15);color:#f87171}
+.result{background:#050912;border:1px solid var(--line);padding:12px 14px;border-radius:12px;font:12px/1.7 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;height:300px;overflow-y:auto;color:#94a3b8;overscroll-behavior:contain;contain:content;scrollbar-width:thin;scrollbar-color:#25344f transparent}
+.result div{padding:1px 0 1px 10px;border-left:2px solid transparent;word-break:break-word}
+.result .ok{color:#4ee3b4;border-color:var(--green)}
+.result .fail{color:#ff8a96;border-color:var(--red)}
+.result .sys{color:#7db0ff;border-color:var(--blue)}
+.result .empty{color:var(--muted);border:0;padding:0}
 
-/* Admin Key List */
-.key-item{display:flex;justify-content:space-between;align-items:center;padding:12px 10px;border-bottom:1px solid var(--line);font-family:monospace;font-size:15px}
+.acc-box{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;background:rgba(255,255,255,.03);padding:14px 16px;border-radius:14px;margin-bottom:12px;border:1px solid var(--line);animation:fadeIn .35s var(--ease) both}
+.acc-l{display:flex;align-items:center;gap:12px;min-width:0}
+.avatar{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-weight:800;background:linear-gradient(135deg,#1e3a8a,var(--blue2));flex:none}
+.acc-name{font-weight:800;font-size:15px;word-break:break-all}
+.acc-st{font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px}
+.acc-btns{display:flex;gap:8px}
+
+.key-item{display:flex;justify-content:space-between;align-items:center;gap:10px;padding:13px 4px;border-bottom:1px solid var(--line);animation:fadeIn .3s var(--ease) both}
 .key-item:last-child{border:none}
+.key-code{font:700 16px ui-monospace,Menlo,Consolas,monospace;color:var(--blue);cursor:pointer;letter-spacing:.02em;transition:color .2s}
+.key-code:hover{color:#8fb4ff}
+.key-meta{font-size:12px;color:var(--muted);margin-top:2px}
+.pill{display:inline-block;padding:2px 9px;border-radius:20px;font-size:11px;font-weight:700;background:rgba(34,211,160,.14);color:var(--green);margin-left:6px}
+.empty-box{text-align:center;color:var(--muted);padding:28px 10px;font-size:14px}
+.hint{font-size:12.5px;color:var(--muted);margin-top:10px}
 .hidden{display:none!important}
+
+#toast{position:fixed;left:50%;bottom:calc(22px + env(safe-area-inset-bottom));transform:translate(-50%,24px);background:#16213a;border:1px solid var(--line2);padding:12px 22px;border-radius:14px;font-weight:600;font-size:14px;opacity:0;pointer-events:none;z-index:999;box-shadow:0 18px 40px rgba(0,0,0,.55);transition:opacity .3s,transform .35s var(--ease);max-width:92vw;text-align:center}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media(max-width:560px){
+  .login{margin-top:5vh;padding:20px}
+  .grid{gap:10px}.metric{font-size:18px}
+  .panel{padding:16px}
+  .acc-btns{width:100%}.acc-btns .btn{flex:1}
+  .row .btn{width:100%}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
 </style>
 </head>
 <body>
+<div class="bg" aria-hidden="true"><i></i><i></i></div>
 
 <!-- VIEW 1: LOGIN -->
 <div class="wrap hidden" id="loginView">
-  <div class="panel" style="max-width:400px;margin:10vh auto;">
-    <div class="brand" style="margin-bottom:24px;">
-      <div class="logo-box"><img src="https://lc79.games/assets/main/native/b6/b6241882-ec69-4e67-9c4e-ac4c1632c0d3.webp" onerror="this.outerHTML='<span>79</span>'"></div>
+  <div class="panel login" id="loginCard">
+    <div class="brand">
+      <div class="logo-box"><img src="https://lc79.games/assets/main/native/b6/b6241882-ec69-4e67-9c4e-ac4c1632c0d3.webp" alt="" onerror="this.outerHTML='<span>79</span>'"></div>
       <div><h1>LC79 Auto</h1><div class="sub">Hệ thống Đa người dùng</div></div>
     </div>
-    <div class="tabs">
-      <div class="tab on" id="tabUser" onclick="switchTab('user')">Người Dùng</div>
-      <div class="tab" id="tabAdmin" onclick="switchTab('admin')">Admin</div>
+    <div class="tabs" id="tabs" data-t="user" role="tablist">
+      <div class="ind"></div>
+      <div class="tab on" id="tabUser" role="tab" tabindex="0" onclick="switchTab('user')">Người Dùng</div>
+      <div class="tab" id="tabAdmin" role="tab" tabindex="0" onclick="switchTab('admin')">Admin</div>
     </div>
 
     <!-- Form Khách -->
-    <div id="formUser">
+    <div id="formUser" class="formfade">
       <div class="field">
-        <label>Nhập Key của bạn</label>
-        <input id="inpKey" placeholder="VD: LC79-A1B2C3" autocomplete="off">
+        <label for="inpKey">Nhập Key của bạn</label>
+        <input id="inpKey" placeholder="VD: LC79-A1B2C3" autocomplete="off" autocapitalize="characters" spellcheck="false">
       </div>
-      <button class="btn primary w100" onclick="loginUser()">Đăng nhập bằng Key</button>
+      <button class="btn primary w100" id="btnLoginUser" onclick="loginUser()">Đăng nhập bằng Key</button>
     </div>
 
     <!-- Form Admin -->
     <div id="formAdmin" class="hidden">
       <div class="field">
-        <label>Mật khẩu Admin</label>
-        <input id="inpAdminPass" type="password" placeholder="Nhập mật khẩu tạo Key">
+        <label for="inpAdminPass">Mật khẩu Admin</label>
+        <input id="inpAdminPass" type="password" placeholder="Nhập mật khẩu tạo Key" autocomplete="current-password">
       </div>
-      <button class="btn w100" onclick="loginAdmin()">Vào trang Quản trị</button>
+      <button class="btn primary w100" id="btnLoginAdmin" onclick="loginAdmin()">Vào trang Quản trị</button>
     </div>
   </div>
 </div>
@@ -102,40 +163,40 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.2)}
 <div class="wrap hidden" id="userView">
   <div class="top">
     <div class="brand">
-      <div class="logo-box"><img src="https://lc79.games/assets/main/native/b6/b6241882-ec69-4e67-9c4e-ac4c1632c0d3.webp"></div>
-      <div><h1>Bảng điều khiển</h1><div class="sub" id="txtUserKey">Key: ...</div></div>
+      <div class="logo-box"><img src="https://lc79.games/assets/main/native/b6/b6241882-ec69-4e67-9c4e-ac4c1632c0d3.webp" alt="" onerror="this.outerHTML='<span>79</span>'"></div>
+      <div style="min-width:0"><h1>Bảng điều khiển</h1><div class="sub" id="txtUserKey">Key: ...</div></div>
     </div>
-    <button class="btn danger" onclick="logout()">Đăng xuất</button>
+    <button class="btn danger sm" onclick="logout()">Đăng xuất</button>
   </div>
 
   <div class="grid">
-    <div class="card">
+    <div class="card" id="cardActive" style="--accent:var(--muted)">
       <div class="lbl">Trạng thái Tool</div>
       <div class="metric" id="userActive">Đang tải...</div>
     </div>
-    <div class="card">
+    <div class="card" style="--accent:var(--amber)">
       <div class="lbl">Code mới nhất</div>
       <div class="metric" id="userCode">—</div>
     </div>
   </div>
 
-  <div class="panel" style="margin-bottom:20px;">
-    <h2 style="font-size:16px;margin-bottom:16px;">Quản lý Tài khoản (Tối đa 1 acc)</h2>
+  <div class="panel">
+    <h2 style="margin-bottom:16px">Quản lý Tài khoản (Tối đa 1 acc)</h2>
     <div id="accContainer"></div>
-    
-    <div id="formAddAcc">
-      <div style="display:flex;gap:10px;flex-wrap:wrap;">
-        <input id="accU" placeholder="Tên đăng nhập" style="flex:1;min-width:150px;">
-        <input id="accP" type="password" placeholder="Mật khẩu" style="flex:1;min-width:150px;">
-        <button class="btn primary" onclick="addAcc()">Lưu & Đăng nhập</button>
+
+    <div id="formAddAcc" class="hidden">
+      <div class="row">
+        <input id="accU" placeholder="Tên đăng nhập" autocomplete="off">
+        <input id="accP" type="password" placeholder="Mật khẩu" autocomplete="off">
+        <button class="btn primary" id="btnAddAcc" onclick="addAcc()">Lưu &amp; Đăng nhập</button>
       </div>
-      <div class="sub" style="margin-top:8px;">* Mỗi Key chỉ được treo 1 acc duy nhất để đảm bảo tốc độ.</div>
+      <div class="hint">* Mỗi Key chỉ được treo 1 acc duy nhất để đảm bảo tốc độ.</div>
     </div>
   </div>
 
   <div class="panel">
-    <h2 style="font-size:16px;margin-bottom:12px;">Nhật ký đổi mã</h2>
-    <div class="result" id="userLogs"></div>
+    <h2 style="margin-bottom:12px">Nhật ký đổi mã</h2>
+    <div class="result" id="userLogs"><div class="empty">Chưa có log...</div></div>
   </div>
 </div>
 
@@ -143,45 +204,87 @@ input:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(59,130,246,.2)}
 <div class="wrap hidden" id="adminView">
   <div class="top">
     <div class="brand">
-      <div class="logo-box"><img src="https://lc79.games/assets/main/native/b6/b6241882-ec69-4e67-9c4e-ac4c1632c0d3.webp"></div>
+      <div class="logo-box"><img src="https://lc79.games/assets/main/native/b6/b6241882-ec69-4e67-9c4e-ac4c1632c0d3.webp" alt="" onerror="this.outerHTML='<span>79</span>'"></div>
       <div><h1>Trang Quản Trị</h1><div class="sub">Quản lý Key người dùng</div></div>
     </div>
-    <button class="btn danger" onclick="logout()">Đăng xuất</button>
+    <button class="btn danger sm" onclick="logout()">Đăng xuất</button>
   </div>
 
   <div class="panel">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
-      <h2 style="font-size:16px;">Danh sách Key</h2>
-      <button class="btn success" onclick="createKey()">+ Tạo Key mới</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px">
+      <h2>Danh sách Key</h2>
+      <button class="btn success sm" id="btnCreateKey" onclick="createKey()">+ Tạo Key mới</button>
     </div>
     <div id="adminKeyList"></div>
   </div>
 </div>
 
-<div id="toast" style="position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#1e293b;padding:12px 24px;border-radius:20px;font-weight:600;display:none;z-index:999;box-shadow:0 10px 30px rgba(0,0,0,.5)"></div>
+<div id="toast" role="status" aria-live="polite"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 let myKey = '';
 let isAdmin = false;
 let refreshTimer = null;
+let refreshGen = 0;      // đổi mỗi lần đăng nhập/đăng xuất để bỏ qua phản hồi cũ
+let toastTimer = null;
+const lastSig = {};      // lưu dữ liệu lần render trước để chỉ cập nhật khi có thay đổi
+
+// Chống XSS khi chèn dữ liệu từ server vào HTML
+function esc(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+// Chỉ ghi DOM khi nội dung thật sự đổi (hết giật/đơ do render lại liên tục)
+function setHTML(el, key, html) {
+  if (lastSig[key] === html) return false;
+  lastSig[key] = html;
+  el.innerHTML = html;
+  return true;
+}
+function setText(el, v) { if (el.textContent !== v) el.textContent = v; }
 
 function toast(msg) {
   const t = $('toast');
   t.textContent = msg;
-  t.style.display = 'block';
-  setTimeout(() => t.style.display = 'none', 3000);
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 2800);
 }
+
+// Nút đang xử lý: khóa + hiện spinner, tránh bấm đúp
+async function withBusy(btn, fn) {
+  if (btn) { if (btn.classList.contains('busy')) return; btn.classList.add('busy'); btn.disabled = true; }
+  try { return await fn(); }
+  finally { if (btn) { btn.classList.remove('busy'); btn.disabled = false; } }
+}
+
+// Hiệu ứng gợn sóng khi bấm nút
+document.addEventListener('pointerdown', e => {
+  const b = e.target.closest('.btn');
+  if (!b || b.disabled) return;
+  const r = b.getBoundingClientRect(), d = Math.max(r.width, r.height) / 2;
+  const s = document.createElement('span');
+  s.className = 'ripple';
+  s.style.cssText = `width:${d}px;height:${d}px;left:${e.clientX - r.left - d/2}px;top:${e.clientY - r.top - d/2}px`;
+  b.appendChild(s);
+  setTimeout(() => s.remove(), 600);
+});
 
 // CHUYỂN TAB LOGIN
 function switchTab(type) {
-  if(type === 'user') {
-    $('tabUser').classList.add('on'); $('tabAdmin').classList.remove('on');
-    $('formUser').classList.remove('hidden'); $('formAdmin').classList.add('hidden');
-  } else {
-    $('tabAdmin').classList.add('on'); $('tabUser').classList.remove('on');
-    $('formAdmin').classList.remove('hidden'); $('formUser').classList.add('hidden');
-  }
+  const user = type === 'user';
+  $('tabs').dataset.t = type;
+  $('tabUser').classList.toggle('on', user);
+  $('tabAdmin').classList.toggle('on', !user);
+  $('formUser').classList.toggle('hidden', !user);
+  $('formAdmin').classList.toggle('hidden', user);
+  const f = user ? $('formUser') : $('formAdmin');
+  f.classList.remove('formfade'); void f.offsetWidth; f.classList.add('formfade');
+}
+
+function shakeLogin() {
+  const c = $('loginCard');
+  c.classList.remove('shake'); void c.offsetWidth; c.classList.add('shake');
 }
 
 // API CALL
@@ -197,88 +300,120 @@ async function api(url, method = 'GET', body = null) {
 // ĐĂNG NHẬP
 async function loginUser() {
   const k = $('inpKey').value.trim().toUpperCase();
-  if (!k) return toast('Nhập Key trước!');
+  if (!k) { shakeLogin(); return toast('Nhập Key trước!'); }
   myKey = k;
-  try {
-    await api('/api/user/state');
-    showView('userView');
-    startRefresh(2000, refreshUser);
-  } catch (e) {
-    myKey = '';
-    toast('Key không hợp lệ!');
-  }
+  await withBusy($('btnLoginUser'), async () => {
+    try {
+      await api('/api/user/state');
+      showView('userView');
+      startRefresh(2000, refreshUser);
+    } catch (e) {
+      myKey = '';
+      shakeLogin();
+      toast('Key không hợp lệ!');
+    }
+  });
 }
 
 async function loginAdmin() {
   const p = $('inpAdminPass').value.trim();
-  if (!p) return toast('Nhập mật khẩu Admin!');
-  try {
-    const res = await fetch('/api/admin/login', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: p}) });
-    if (!res.ok) throw new Error('Sai mật khẩu');
-    isAdmin = true;
-    showView('adminView');
-    loadAdminKeys();
-  } catch (e) {
-    toast('Sai mật khẩu Admin!');
-  }
+  if (!p) { shakeLogin(); return toast('Nhập mật khẩu Admin!'); }
+  await withBusy($('btnLoginAdmin'), async () => {
+    try {
+      const res = await fetch('/api/admin/login', { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({password: p}) });
+      if (!res.ok) throw new Error('Sai mật khẩu');
+      isAdmin = true;
+      showView('adminView');
+      loadAdminKeys();
+    } catch (e) {
+      shakeLogin();
+      toast('Sai mật khẩu Admin!');
+    }
+  });
 }
 
 function logout() {
   myKey = ''; isAdmin = false;
-  clearInterval(refreshTimer);
+  refreshGen++;
+  clearTimeout(refreshTimer);
+  Object.keys(lastSig).forEach(k => delete lastSig[k]);
+  $('inpKey').value = ''; $('inpAdminPass').value = '';
   showView('loginView');
 }
 
 function showView(viewId) {
-  $('loginView').classList.add('hidden');
-  $('userView').classList.add('hidden');
-  $('adminView').classList.add('hidden');
-  $(viewId).classList.remove('hidden');
+  ['loginView','userView','adminView'].forEach(id => $(id).classList.add('hidden'));
+  const v = $(viewId);
+  v.classList.remove('hidden');
+  v.classList.remove('view'); void v.offsetWidth; v.classList.add('view');
 }
 
+// Vòng lặp làm mới: chờ request xong mới hẹn lượt kế tiếp (không chồng request),
+// tạm dừng khi tab bị ẩn => nhẹ máy, không đơ
 function startRefresh(ms, fn) {
-  clearInterval(refreshTimer);
-  fn();
-  refreshTimer = setInterval(fn, ms);
+  clearTimeout(refreshTimer);
+  const gen = ++refreshGen;
+  const tick = async () => {
+    if (gen !== refreshGen) return;
+    if (!document.hidden) await fn(gen);
+    if (gen !== refreshGen) return;
+    refreshTimer = setTimeout(tick, ms);
+  };
+  tick();
 }
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && myKey && !isAdmin) startRefresh(2000, refreshUser);
+});
 
 // --- DÀNH CHO USER ---
-async function refreshUser() {
+async function refreshUser(gen) {
   try {
     const res = await api('/api/user/state');
+    if (gen !== refreshGen) return;
     const s = res.state;
-    
-    $('txtUserKey').textContent = 'Key: ' + myKey;
-    $('userActive').innerHTML = s.active ? '<span style="color:var(--green)">ĐANG BẬT</span>' : '<span style="color:var(--red)">ĐANG TẮT</span>';
-    $('userCode').textContent = s.lastCode || '—';
-    
+
+    setText($('txtUserKey'), 'Key: ' + myKey);
+
+    const on = !!s.active;
+    setHTML($('userActive'), 'active', `<span class="dot ${on ? 'live' : ''}" style="--c:${on ? 'var(--green)' : 'var(--red)'}"></span><span class="${on ? 'on-t' : 'off-t'}">${on ? 'ĐANG BẬT' : 'ĐANG TẮT'}</span>`);
+    $('cardActive').style.setProperty('--accent', on ? 'var(--green)' : 'var(--red)');
+    setText($('userCode'), s.lastCode || '—');
+
     if (s.account) {
       $('formAddAcc').classList.add('hidden');
-      $('accContainer').innerHTML = `
+      const a = s.account;
+      const stColor = a.loggedIn ? 'var(--green)' : 'var(--red)';
+      setHTML($('accContainer'), 'acc', `
         <div class="acc-box">
-          <div>
-            <div class="acc-name">${s.account.username}</div>
-            <div class="sub" style="font-size:12px;color:${s.account.loggedIn ? 'var(--green)' : 'var(--red)'};font-weight:600">
-              ${s.account.loggedIn ? 'Đã đăng nhập' : (s.account.error || 'Lỗi kết nối')}
+          <div class="acc-l">
+            <div class="avatar">${esc((a.username || '?').charAt(0).toUpperCase())}</div>
+            <div>
+              <div class="acc-name">${esc(a.username)}</div>
+              <div class="acc-st" style="color:${stColor}"><span class="dot ${a.loggedIn ? 'live' : ''}" style="--c:${stColor};width:7px;height:7px"></span>${a.loggedIn ? 'Đã đăng nhập' : esc(a.error || 'Lỗi kết nối')}</div>
             </div>
           </div>
-          <div style="display:flex;gap:8px;">
-            <button class="btn ${s.active ? 'danger' : 'success'}" onclick="toggleTool()">${s.active ? 'TẮT TOOL' : 'BẬT TOOL'}</button>
-            <button class="btn" onclick="delAcc()">Xóa</button>
+          <div class="acc-btns">
+            <button class="btn ${on ? 'danger' : 'success'}" onclick="toggleTool(this)">${on ? 'TẮT TOOL' : 'BẬT TOOL'}</button>
+            <button class="btn" onclick="delAcc(this)">Xóa</button>
           </div>
-        </div>
-      `;
+        </div>`);
     } else {
-      $('accContainer').innerHTML = '';
+      setHTML($('accContainer'), 'acc', '');
       $('formAddAcc').classList.remove('hidden');
     }
 
-    const logHtml = s.logs.map(l => {
-      if (l.includes('[OK]')) return `<div class="ok">${l}</div>`;
-      if (l.includes('[FAIL]')) return `<div class="fail">${l}</div>`;
-      return `<div class="sys">${l}</div>`;
-    }).join('');
-    $('userLogs').innerHTML = logHtml || 'Chưa có log...';
+    // Nhật ký: chỉ vẽ lại khi có log mới, giữ nguyên vị trí cuộn
+    const logs = Array.isArray(s.logs) ? s.logs : [];
+    const logHtml = logs.map(l => {
+      const t = esc(l);
+      if (l.includes('[OK]')) return `<div class="ok">${t}</div>`;
+      if (l.includes('[FAIL]')) return `<div class="fail">${t}</div>`;
+      return `<div class="sys">${t}</div>`;
+    }).join('') || '<div class="empty">Chưa có log...</div>';
+    const box = $('userLogs');
+    const nearBottom = box.scrollHeight - box.scrollTop - box.clientHeight < 40;
+    const top = box.scrollTop;
+    if (setHTML(box, 'logs', logHtml)) box.scrollTop = nearBottom ? box.scrollHeight : top;
   } catch (e) { console.log(e); }
 }
 
@@ -286,65 +421,98 @@ async function addAcc() {
   const u = $('accU').value.trim();
   const p = $('accP').value.trim();
   if (!u || !p) return toast('Nhập đủ Tài khoản và Mật khẩu!');
-  try {
-    toast('Đang kiểm tra đăng nhập...');
-    await api('/api/user/account', 'POST', { username: u, password: p });
-    $('accU').value = ''; $('accP').value = '';
-    refreshUser();
-  } catch (e) { toast(e.message); }
+  await withBusy($('btnAddAcc'), async () => {
+    try {
+      toast('Đang kiểm tra đăng nhập...');
+      await api('/api/user/account', 'POST', { username: u, password: p });
+      $('accU').value = ''; $('accP').value = '';
+      await refreshUser(refreshGen);
+    } catch (e) { toast(e.message); }
+  });
 }
 
-async function delAcc() {
+async function delAcc(btn) {
   if (!confirm('Xóa tài khoản này?')) return;
-  await api('/api/user/account', 'DELETE');
-  refreshUser();
+  await withBusy(btn, async () => {
+    try {
+      await api('/api/user/account', 'DELETE');
+      await refreshUser(refreshGen);
+    } catch (e) { toast(e.message); }
+  });
 }
 
-async function toggleTool() {
-  try {
-    await api('/api/user/toggle', 'POST');
-    refreshUser();
-  } catch (e) { toast(e.message); }
+async function toggleTool(btn) {
+  await withBusy(btn, async () => {
+    try {
+      await api('/api/user/toggle', 'POST');
+      await refreshUser(refreshGen);
+    } catch (e) { toast(e.message); }
+  });
 }
 
 // --- DÀNH CHO ADMIN ---
 async function loadAdminKeys() {
   try {
     const res = await api('/api/admin/keys');
-    const list = $('adminKeyList');
-    list.innerHTML = '';
-    if (res.keys.length === 0) list.innerHTML = '<div class="sub">Chưa có key nào. Bấm tạo Key mới.</div>';
-    
-    res.keys.forEach(k => {
-      const div = document.createElement('div');
-      div.className = 'key-item';
-      div.innerHTML = `
-        <div>
-          <strong style="color:var(--blue);font-size:16px;">${k.key}</strong>
-          ${k.hasAcc ? `<span style="margin-left:10px;font-size:12px;color:var(--muted)">(Acc: ${k.username} ${k.active ? '- Đang bật' : ''})</span>` : ''}
-        </div>
-        <button class="btn danger" style="padding:6px 10px;font-size:12px;" onclick="delKey('${k.key}')">Xóa</button>
-      `;
-      list.appendChild(div);
-    });
+    const keys = res.keys || [];
+    const html = keys.length === 0
+      ? '<div class="empty-box">Chưa có key nào. Bấm “Tạo Key mới” để bắt đầu.</div>'
+      : keys.map(k => `
+        <div class="key-item">
+          <div style="min-width:0">
+            <div class="key-code" title="Bấm để sao chép" data-copy="${esc(k.key)}">${esc(k.key)}${k.active ? '<span class="pill">Đang bật</span>' : ''}</div>
+            <div class="key-meta">${k.hasAcc ? 'Acc: ' + esc(k.username) : 'Chưa gắn tài khoản'}</div>
+          </div>
+          <button class="btn danger sm" data-del="${esc(k.key)}">Xóa</button>
+        </div>`).join('');
+    setHTML($('adminKeyList'), 'keys', html);
   } catch (e) { toast(e.message); }
 }
+
+// Gắn sự kiện 1 lần cho danh sách key (sao chép / xóa)
+$('adminKeyList').addEventListener('click', e => {
+  const del = e.target.closest('[data-del]');
+  if (del) return delKey(del.dataset.del, del);
+  const cp = e.target.closest('[data-copy]');
+  if (cp) {
+    const v = cp.dataset.copy;
+    (navigator.clipboard ? navigator.clipboard.writeText(v) : Promise.reject())
+      .then(() => toast('Đã sao chép: ' + v)).catch(() => toast(v));
+  }
+});
 
 async function createKey() {
-  try {
-    const res = await api('/api/admin/keys', 'POST');
-    toast('Đã tạo Key: ' + res.key);
-    loadAdminKeys();
-  } catch (e) { toast(e.message); }
+  await withBusy($('btnCreateKey'), async () => {
+    try {
+      const res = await api('/api/admin/keys', 'POST');
+      toast('Đã tạo Key: ' + res.key);
+      await loadAdminKeys();
+    } catch (e) { toast(e.message); }
+  });
 }
 
-async function delKey(k) {
+async function delKey(k, btn) {
   if (!confirm('Xóa Key ' + k + '?')) return;
-  try {
-    await api('/api/admin/keys/' + k, 'DELETE');
-    loadAdminKeys();
-  } catch (e) { toast(e.message); }
+  await withBusy(btn, async () => {
+    try {
+      await api('/api/admin/keys/' + encodeURIComponent(k), 'DELETE');
+      await loadAdminKeys();
+    } catch (e) { toast(e.message); }
+  });
 }
+
+// Phím Enter để đăng nhập / lưu nhanh
+document.addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    const id = document.activeElement && document.activeElement.id;
+    if (id === 'inpKey') loginUser();
+    else if (id === 'inpAdminPass') loginAdmin();
+    else if (id === 'accU' || id === 'accP') addAcc();
+  }
+  if ((e.key === 'Enter' || e.key === ' ') && document.activeElement && document.activeElement.classList.contains('tab')) {
+    e.preventDefault(); document.activeElement.click();
+  }
+});
 
 // KHỞI ĐỘNG
 showView('loginView');
