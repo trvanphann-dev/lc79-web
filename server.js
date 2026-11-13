@@ -10,7 +10,7 @@ const path = require('path');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const COOKIE_SECURE = process.env.COOKIE_SECURE === '1';
-const ADMIN_PASS = process.env.WEB_PASSWORD || 'admin123456789'; // Dùng pass này để vào trang Admin tạo Key
+const ADMIN_PASS = process.env.WEB_PASSWORD || 'admin123456789'; 
 const INDEX_FILE = path.join(__dirname, 'index.html');
 
 if (!ADMIN_PASS || ADMIN_PASS.length < 12) {
@@ -27,11 +27,10 @@ const API_REDEEM = 'https://gameapi.tele68.com/v1/giftcode/redemption';
 const DEFAULT_CHANNEL = 'codelaucuagame'; 
 const DEFAULT_REGEX = '[A-Z0-9]{6,12}'; 
 const FAST_POLL_MS = 1000; 
-const FETCH_TIMEOUT_MS = 2500; 
+const FETCH_TIMEOUT_MS = 4000; // Tăng lên 4s để đỡ báo lỗi mạng
 
-// ==================== HỆ THỐNG DATABASE (RAM) ====================
-// Cấu trúc: users[key] = { account: {u, p, loggedIn, at, jwt}, logs: [] }
-const users = {};
+// ==================== DATABASE RAM ====================
+const users = {}; // users[key] = { account: {u, p, loggedIn, at, jwt, lastError}, logs: [] }
 const globalLogs = [];
 
 function addLog(userKey, msg) {
@@ -46,12 +45,10 @@ function addLog(userKey, msg) {
   console.log(`[${userKey || 'SYS'}] ${line}`);
 }
 
-// Tạo key ngẫu nhiên
 function generateKey() {
   return 'LC79-' + crypto.randomBytes(3).toString('hex').toUpperCase();
 }
 
-// ==================== HELPERS ====================
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
@@ -91,7 +88,7 @@ function cleanMsg(m0) {
 
 const hashPass = p => /^[0-9a-fA-F]{32}$/.test(p) ? p.toLowerCase() : crypto.createHash('md5').update(p, 'utf8').digest('hex');
 
-// ==================== LOGIN / REDEEM (Chạy cho từng User) ====================
+// ==================== LOGIN / REDEEM ====================
 async function loginAcc(userKey) {
   const acc = users[userKey].account;
   if (!acc) return false;
@@ -137,7 +134,6 @@ async function redeemForUser(userKey, code) {
       body: JSON.stringify({ code }),
     });
     
-    // Tự động login lại nếu token hết hạn
     if (r.status === 401 || (r.json && r.json.errorCode === 401)) {
         const success = await loginAcc(userKey);
         if(success) {
@@ -152,11 +148,16 @@ async function redeemForUser(userKey, code) {
     if (r.status >= 400) addLog(userKey, `[FAIL] ${code} (${timeTaken}ms) - ${cleanMsg(r.text)}`);
     else addLog(userKey, `[OK] ${code} (${timeTaken}ms) - Nhận thành công!`);
   } catch (e) {
-    addLog(userKey, `[LỖI MẠNG] ${code} - ${e.message}`);
+    const timeTaken = Date.now() - startT;
+    let errMsg = e.message;
+    if (errMsg.includes('aborted') || errMsg.includes('fetch failed')) {
+        errMsg = 'Bị Server Game chặn hoặc rớt mạng (' + timeTaken + 'ms)';
+    }
+    addLog(userKey, `[LỖI] ${code} - ${errMsg}`);
   }
 }
 
-// ==================== BỘ QUÉT CODE TOÀN CẦU ====================
+// ==================== BỘ QUÉT CODE ====================
 async function getCodes(channel, rxStr) {
   const rx = new RegExp(rxStr);
   const out = [];
@@ -186,9 +187,9 @@ async function watcherLoop() {
         if (newest.code !== lastGlobalCode) {
           lastGlobalCode = newest.code;
           addLog('SYS', '🔥 PHÁT HIỆN CODE MỚI: ' + lastGlobalCode);
-          // Bắn code cho tất cả user đang bật tool
+          // Chạy ngầm không cần quan tâm người dùng có mở web hay ko
           for (const key in users) {
-             if (users[key].account && users[key].account.loggedIn && users[key].active) {
+             if (users[key].account && users[key].account.loggedIn) {
                 redeemForUser(key, lastGlobalCode);
              }
           }
@@ -199,11 +200,8 @@ async function watcherLoop() {
   }
 }
 
-// ==================== EXPRESS SERVER ====================
+// ==================== EXPRESS ====================
 const app = express();
-const sessions = new Map();
-const COOKIE_NAME = 'lc79sid';
-
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: { directives: {
   defaultSrc: ["'self'"], scriptSrc: ["'self'", "'unsafe-inline'"],
@@ -212,30 +210,20 @@ app.use(helmet({ contentSecurityPolicy: { directives: {
 } } }));
 app.use(express.json({ limit: '10kb' }));
 
-const cookieOpts = { httpOnly: true, secure: COOKIE_SECURE, sameSite: 'strict', path: '/' };
-
-// Middleware kiểm tra Key
 function requireKey(req, res, next) {
   const key = req.headers['x-api-key'];
-  if (key === 'ADMIN') {
-     return next(); // Admin bypass
-  }
-  if (!key || !users[key]) {
-    return res.status(401).json({ ok: false, error: 'Key không hợp lệ hoặc đã bị xóa.' });
-  }
+  if (key === 'ADMIN') return next();
+  if (!key || !users[key]) return res.status(401).json({ ok: false, error: 'Key không hợp lệ hoặc đã bị xóa.' });
   req.userKey = key;
   next();
 }
 
-// ---------------- API CHO NGƯỜI DÙNG ----------------
-
-// Lấy trạng thái tool của user
 app.get('/api/user/state', requireKey, (req, res) => {
   const u = users[req.userKey];
   res.json({
     ok: true,
     state: {
-      active: u.active,
+      active: !!(u.account && u.account.loggedIn), // Tự động bật nếu có acc
       account: u.account ? { username: u.account.u, loggedIn: u.account.loggedIn, error: u.account.lastError } : null,
       logs: u.logs,
       lastCode: lastGlobalCode
@@ -243,58 +231,33 @@ app.get('/api/user/state', requireKey, (req, res) => {
   });
 });
 
-// Thêm acc (Giới hạn 1 acc)
 app.post('/api/user/account', requireKey, async (req, res) => {
   const { username, password } = req.body;
   if (!username || !password) return res.status(400).json({ ok: false, error: 'Thiếu thông tin.' });
   
   const u = users[req.userKey];
-  if (u.account) return res.status(400).json({ ok: false, error: 'Bạn đã thêm 1 acc rồi. Vui lòng xóa acc cũ trước khi thêm mới.' });
+  if (u.account) return res.status(400).json({ ok: false, error: 'Bạn đã thêm 1 acc rồi. Vui lòng xóa acc cũ.' });
 
   u.account = { u: username, p: hashPass(password), loggedIn: false, at: '', jwt: '', lastError: '' };
   await loginAcc(req.userKey);
   res.json({ ok: true });
 });
 
-// Xóa acc
 app.delete('/api/user/account', requireKey, (req, res) => {
   users[req.userKey].account = null;
-  users[req.userKey].active = false;
   addLog(req.userKey, 'Đã xóa acc.');
   res.json({ ok: true });
 });
 
-// Bật / Tắt tool
-app.post('/api/user/toggle', requireKey, (req, res) => {
-  const u = users[req.userKey];
-  if (!u.account) return res.status(400).json({ ok: false, error: 'Vui lòng thêm acc trước khi bật tool.' });
-  u.active = !u.active;
-  addLog(req.userKey, u.active ? 'BẬT tool tự động.' : 'TẮT tool tự động.');
-  res.json({ ok: true, active: u.active });
-});
-
-// Thêm API Lấy log thủ công
-app.post('/api/user/clear-log', requireKey, (req, res) => {
-  users[req.userKey].logs = [];
-  res.json({ ok: true });
-});
-
-
-// ---------------- API CHO ADMIN ----------------
 app.post('/api/admin/login', (req, res) => {
-  if (req.body.password === ADMIN_PASS) {
-    return res.json({ ok: true, adminPass: ADMIN_PASS }); // Trả về pass để lưu tạm vào sessionStorage
-  }
+  if (req.body.password === ADMIN_PASS) return res.json({ ok: true });
   res.status(401).json({ ok: false, error: 'Sai mật khẩu Admin.' });
 });
 
 app.get('/api/admin/keys', (req, res) => {
   if (req.headers['x-api-key'] !== 'ADMIN') return res.status(401).json({ ok: false });
   const list = Object.keys(users).map(k => ({
-    key: k,
-    hasAcc: !!users[k].account,
-    username: users[k].account ? users[k].account.u : '',
-    active: users[k].active
+    key: k, hasAcc: !!users[k].account, username: users[k].account ? users[k].account.u : '', active: !!(users[k].account && users[k].account.loggedIn)
   }));
   res.json({ ok: true, keys: list });
 });
@@ -302,7 +265,7 @@ app.get('/api/admin/keys', (req, res) => {
 app.post('/api/admin/keys', (req, res) => {
   if (req.headers['x-api-key'] !== 'ADMIN') return res.status(401).json({ ok: false });
   const newKey = generateKey();
-  users[newKey] = { account: null, active: false, logs: [] };
+  users[newKey] = { account: null, logs: [] };
   addLog('SYS', 'Admin tạo Key mới: ' + newKey);
   res.json({ ok: true, key: newKey });
 });
@@ -314,13 +277,9 @@ app.delete('/api/admin/keys/:key', (req, res) => {
     delete users[k];
     addLog('SYS', 'Admin xóa Key: ' + k);
     res.json({ ok: true });
-  } else {
-    res.status(404).json({ ok: false });
-  }
+  } else res.status(404).json({ ok: false });
 });
 
-
-// ---------------- GIAO DIỆN ----------------
 app.get('/', (req, res) => res.sendFile(INDEX_FILE));
 
 // ==================== BOOT ====================
