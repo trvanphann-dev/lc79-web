@@ -9,13 +9,11 @@ const path = require('path');
 // ==================== CONFIG ====================
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
-const WEB_USER = process.env.WEB_USER || 'admin';
-const WEB_PASSWORD = process.env.WEB_PASSWORD || '';
 const COOKIE_SECURE = process.env.COOKIE_SECURE === '1';
-const DATA_FILE = process.env.DATA_FILE || path.join(__dirname, 'data.json');
+const ADMIN_PASS = process.env.WEB_PASSWORD || 'admin123456789'; // Dùng pass này để vào trang Admin tạo Key
 const INDEX_FILE = path.join(__dirname, 'index.html');
 
-if (!WEB_PASSWORD || WEB_PASSWORD.length < 12) {
+if (!ADMIN_PASS || ADMIN_PASS.length < 12) {
   console.error('THIEU WEB_PASSWORD (>=12 ky tu).');
   process.exit(1);
 }
@@ -28,51 +26,32 @@ const API_REDEEM = 'https://gameapi.tele68.com/v1/giftcode/redemption';
 
 const DEFAULT_CHANNEL = 'codelaucuagame'; 
 const DEFAULT_REGEX = '[A-Z0-9]{6,12}'; 
-const FAST_POLL_MS = 1000; // Quét cực nhanh mỗi 1 giây
-const FETCH_TIMEOUT_MS = 5000; // Cắt mạng nếu quá 5s
+const FAST_POLL_MS = 1000; 
+const FETCH_TIMEOUT_MS = 2500; 
 
-// ==================== STATE ====================
-const S = {
-  accounts: [],
-  paused: false,
-  lastCode: '',
-  startTime: Date.now(),
-  logs: [],
-};
+// ==================== HỆ THỐNG DATABASE (RAM) ====================
+// Cấu trúc: users[key] = { account: {u, p, loggedIn, at, jwt}, logs: [] }
+const users = {};
+const globalLogs = [];
 
-function log(msg) {
-  const line = '[' + new Date().toTimeString().slice(0, 8) + '] ' + String(msg);
-  S.logs.unshift(line);
-  if (S.logs.length > 200) S.logs.length = 200;
-  console.log(line);
+function addLog(userKey, msg) {
+  const time = new Date().toTimeString().slice(0, 8);
+  const line = `[${time}] ${msg}`;
+  if (userKey && users[userKey]) {
+    users[userKey].logs.unshift(line);
+    if (users[userKey].logs.length > 50) users[userKey].logs.length = 50;
+  }
+  globalLogs.unshift(`[${userKey || 'SYS'}] ${line}`);
+  if (globalLogs.length > 100) globalLogs.length = 100;
+  console.log(`[${userKey || 'SYS'}] ${line}`);
 }
 
-function loadData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const d = JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-      if (Array.isArray(d.accounts)) S.accounts = d.accounts.map(a => ({
-        username: a.username, password: a.password,
-        loggedIn: false, at: '', jwt: '', lastError: ''
-      }));
-      log('Nap data: ' + S.accounts.length + ' acc');
-    }
-  } catch (e) { log('loadData loi: ' + e.message); }
-}
-
-function saveData() {
-  try {
-    const dir = path.dirname(DATA_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(DATA_FILE, JSON.stringify({
-      accounts: S.accounts.map(a => ({ username: a.username, password: a.password }))
-    }, null, 2), 'utf8');
-  } catch (e) { log('saveData loi: ' + e.message); }
+// Tạo key ngẫu nhiên
+function generateKey() {
+  return 'LC79-' + crypto.randomBytes(3).toString('hex').toUpperCase();
 }
 
 // ==================== HELPERS ====================
-const md5 = s => crypto.createHash('md5').update(s, 'utf8').digest('hex');
-const hashPass = p => /^[0-9a-fA-F]{32}$/.test(p) ? p.toLowerCase() : md5(p);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function fetchWithTimeout(url, options = {}, timeout = FETCH_TIMEOUT_MS) {
@@ -110,13 +89,17 @@ function cleanMsg(m0) {
   return m;
 }
 
-// ==================== LOGIN / REDEEM ====================
-async function loginOne(acc) {
+const hashPass = p => /^[0-9a-fA-F]{32}$/.test(p) ? p.toLowerCase() : crypto.createHash('md5').update(p, 'utf8').digest('hex');
+
+// ==================== LOGIN / REDEEM (Chạy cho từng User) ====================
+async function loginAcc(userKey) {
+  const acc = users[userKey].account;
+  if (!acc) return false;
   try {
-    const url = API_LOGIN + '?c=3&un=' + encodeURIComponent(acc.username) + '&pw=' + acc.password + '&cp=R&cl=R&pf=web&at=';
+    const url = API_LOGIN + '?c=3&un=' + encodeURIComponent(acc.u) + '&pw=' + acc.p + '&cp=R&cl=R&pf=web&at=';
     const r = await http(url);
     if (r.status >= 400 || !r.json || r.json.success !== true) {
-      acc.loggedIn = false; acc.lastError = 'login fail'; return false;
+      acc.loggedIn = false; acc.lastError = 'Sai tài khoản/mật khẩu'; return false;
     }
     const at = r.json.accessToken;
     let nick = '';
@@ -127,149 +110,99 @@ async function loginOne(acc) {
       nick = JSON.parse(Buffer.from(b64, 'base64').toString('utf8')).nickname;
     } catch (_) {}
     const lob = await http(API_LOBBY + '?cp=R&cl=R&pf=web&at=' + at, {
-      method: 'POST',
-      headers: { Origin: ORIGIN, Referer: ORIGIN + '/' },
-      body: JSON.stringify({ username: acc.username, nickName: nick, accessToken: at }),
+      method: 'POST', headers: { Origin: ORIGIN, Referer: ORIGIN + '/' },
+      body: JSON.stringify({ username: acc.u, nickName: nick, accessToken: at }),
     });
     if (lob.status >= 400 || !lob.json || !lob.json.token) {
-      acc.loggedIn = false; acc.lastError = 'lobby fail'; return false;
+      acc.loggedIn = false; acc.lastError = 'Lỗi Lobby'; return false;
     }
     acc.loggedIn = true; acc.at = at; acc.jwt = lob.json.token; acc.lastError = '';
+    addLog(userKey, 'Đăng nhập thành công: ' + acc.u);
     return true;
   } catch (e) {
     acc.loggedIn = false; acc.lastError = 'Lỗi mạng'; return false;
   }
 }
 
-// --- HÀM REDEEM CÓ TỰ ĐỘNG LOGIN LẠI (CHỐNG HẾT TOKEN) ---
-async function redeemOne(acc, code) {
-  if (!acc.loggedIn) return { user: acc.username, ok: false, msg: 'chua login' };
+async function redeemForUser(userKey, code) {
+  const acc = users[userKey].account;
+  if (!acc || !acc.loggedIn) return;
+  
+  const startT = Date.now();
+  addLog(userKey, `BẮT ĐẦU ĐỔI MÃ: ${code}`);
+  
   try {
-    // Gửi request lần 1
     let r = await http(API_REDEEM + '?cp=R&cl=R&pf=web&at=' + acc.at, {
-      method: 'POST',
-      headers: { Authorization: 'Bearer ' + acc.jwt, Origin: ORIGIN, Referer: ORIGIN + '/' },
+      method: 'POST', headers: { Authorization: 'Bearer ' + acc.jwt, Origin: ORIGIN, Referer: ORIGIN + '/' },
       body: JSON.stringify({ code }),
     });
     
-    // Nếu thất bại (hoặc mã 401 - Hết hạn token), thử login lại ngay lập tức
-    if (r.status === 401 || (r.json && r.json.errorCode === 401) || r.status >= 500) {
-        const success = await loginOne(acc); // Login lại
+    // Tự động login lại nếu token hết hạn
+    if (r.status === 401 || (r.json && r.json.errorCode === 401)) {
+        const success = await loginAcc(userKey);
         if(success) {
-            // Gửi lại request lần 2 với token mới
             r = await http(API_REDEEM + '?cp=R&cl=R&pf=web&at=' + acc.at, {
-              method: 'POST',
-              headers: { Authorization: 'Bearer ' + acc.jwt, Origin: ORIGIN, Referer: ORIGIN + '/' },
+              method: 'POST', headers: { Authorization: 'Bearer ' + acc.jwt, Origin: ORIGIN, Referer: ORIGIN + '/' },
               body: JSON.stringify({ code }),
             });
         }
     }
 
-    if (r.status >= 400) return { user: acc.username, ok: false, msg: cleanMsg(r.text) };
-    return { user: acc.username, ok: true, msg: cleanMsg(r.text) };
+    const timeTaken = Date.now() - startT;
+    if (r.status >= 400) addLog(userKey, `[FAIL] ${code} (${timeTaken}ms) - ${cleanMsg(r.text)}`);
+    else addLog(userKey, `[OK] ${code} (${timeTaken}ms) - Nhận thành công!`);
   } catch (e) {
-    return { user: acc.username, ok: false, msg: 'Lỗi mạng' };
+    addLog(userKey, `[LỖI MẠNG] ${code} - ${e.message}`);
   }
 }
 
-async function loginAll() {
-  if (!S.accounts.length) return { ok: 0, fail: 0, details: [] };
-  log('Dang login ' + S.accounts.length + ' acc ...');
-  const results = await Promise.all(S.accounts.map(loginOne));
-  const ok = results.filter(Boolean).length;
-  log('Login xong: OK=' + ok);
-  return { ok, fail: results.length - ok, details: [] };
-}
-
-async function redeemAll(code) {
-  const list = S.accounts.filter(a => a.loggedIn);
-  if (!list.length) return { code, ok: 0, fail: 0, details: [] };
-  
-  const startT = Date.now();
-  log('BẮT ĐẦU ĐỔI MÃ: ' + code);
-  
-  const results = await Promise.all(list.map(a => redeemOne(a, code)));
-  const ok = results.filter(r => r.ok).length;
-  const fail = results.length - ok;
-  
-  log('Đổi xong sau ' + (Date.now() - startT) + 'ms. OK=' + ok + ' FAIL=' + fail);
-  for (const r of results) {
-    if (r.ok) log('  [OK] ' + r.user + ' - ' + r.msg);
-    else log('  [FAIL] ' + r.user + ' - ' + r.msg);
-  }
-  return { code, ok, fail, details: results };
-}
-
-// ==================== HÚT CODE SIÊU TỐC ====================
+// ==================== BỘ QUÉT CODE TOÀN CẦU ====================
 async function getCodes(channel, rxStr) {
   const rx = new RegExp(rxStr);
   const out = [];
-  
-  // Dùng RSS (Tốc độ ánh sáng, không cần parse HTML)
   try {
-    const r = await fetchWithTimeout('https://rsshub.app/telegram/channel/' + channel);
-    const xml = await r.text();
-    const items = xml.split('<item>');
-    for (const item of items) {
-      const m = item.match(/<title>(.*?)<\/title>/s);
-      if (m) {
-        const txt = m[1];
-        const codes = txt.match(new RegExp('\\b' + rxStr + '\\b', 'g'));
-        if (codes) for (const c of codes) out.push({ time: Date.now(), code: c });
-      }
+    const r = await fetchWithTimeout('https://t.me/s/' + channel, { headers: { 'User-Agent': UA } });
+    const html = await r.text();
+    const segs = html.split('<div class="tgme_widget_message_wrap');
+    for (const s of segs) {
+      const tmStr = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
+      const tmMs = tmStr ? new Date(tmStr).getTime() : Date.now();
+      for (const x of s.matchAll(/<code>([A-Z0-9]+)<\/code>/g))
+        if (rx.test(x[1])) out.push({ time: tmMs, code: x[1] });
     }
   } catch (_) {}
-
-  // Fallback HTML
-  if (out.length === 0) {
-    try {
-      const r = await fetchWithTimeout('https://t.me/s/' + channel, { headers: { 'User-Agent': UA } });
-      const html = await r.text();
-      const segs = html.split('<div class="tgme_widget_message_wrap');
-      for (const s of segs) {
-        const tmStr = (s.match(/<time datetime="([^"]+)"/) || [])[1] || '';
-        const tmMs = tmStr ? new Date(tmStr).getTime() : Date.now();
-        for (const x of s.matchAll(/<code>([A-Z0-9]+)<\/code>/g))
-          if (rx.test(x[1])) out.push({ time: tmMs, code: x[1] });
-      }
-    } catch (_) {}
-  }
-
   out.sort((a, b) => (b.time - a.time));
   return out;
 }
 
-// ==================== WATCHER ====================
-let watcherRunning = false;
+let lastGlobalCode = '';
 async function watcherLoop() {
-  watcherRunning = true;
-  log('Watcher khoi dong (v4 - Tự động Login lại). Kenh: ' + DEFAULT_CHANNEL);
-  if (S.accounts.length) await loginAll();
-  
+  addLog('SYS', 'Hệ thống theo dõi kênh: ' + DEFAULT_CHANNEL);
   while (true) {
     try {
-      if (!S.paused) {
-        const codes = await getCodes(DEFAULT_CHANNEL, DEFAULT_REGEX);
-        if (codes.length) {
-          const newest = codes[0];
-          if (newest.code !== S.lastCode) {
-            S.lastCode = newest.code;
-            log('PHÁT HIỆN CODE: ' + S.lastCode);
-            redeemAll(S.lastCode).catch(e => log('Loi redeem: ' + e.message));
+      const codes = await getCodes(DEFAULT_CHANNEL, DEFAULT_REGEX);
+      if (codes.length) {
+        const newest = codes[0];
+        if (newest.code !== lastGlobalCode) {
+          lastGlobalCode = newest.code;
+          addLog('SYS', '🔥 PHÁT HIỆN CODE MỚI: ' + lastGlobalCode);
+          // Bắn code cho tất cả user đang bật tool
+          for (const key in users) {
+             if (users[key].account && users[key].account.loggedIn && users[key].active) {
+                redeemForUser(key, lastGlobalCode);
+             }
           }
         }
       }
-    } catch (e) { log('Watcher loi: ' + (e.message || e)); }
-    
+    } catch (e) {}
     await sleep(FAST_POLL_MS);
   }
 }
 
-// ==================== EXPRESS ====================
+// ==================== EXPRESS SERVER ====================
 const app = express();
 const sessions = new Map();
 const COOKIE_NAME = 'lc79sid';
-const SESSION_TTL = 12 * 60 * 60 * 1000;
 
 app.set('trust proxy', 1);
 app.use(helmet({ contentSecurityPolicy: { directives: {
@@ -277,157 +210,121 @@ app.use(helmet({ contentSecurityPolicy: { directives: {
   styleSrc: ["'self'", "'unsafe-inline'"], imgSrc: ["'self'", 'data:', 'https://lc79.games'],
   connectSrc: ["'self'"], upgradeInsecureRequests: null
 } } }));
-app.use(express.json({ limit: '256kb' }));
+app.use(express.json({ limit: '10kb' }));
 
-const loginLimiter = rateLimit({ windowMs: 15 * 60 * 1000, limit: 30 });
-const apiLimiter = rateLimit({ windowMs: 60 * 1000, limit: 200 });
+const cookieOpts = { httpOnly: true, secure: COOKIE_SECURE, sameSite: 'strict', path: '/' };
 
-const safeEqual = (a, b) => {
-  const aa = Buffer.from(String(a)), bb = Buffer.from(String(b));
-  return aa.length === bb.length && crypto.timingSafeEqual(aa, bb);
-};
-const cookieOpts = maxAge => ({ httpOnly: true, secure: COOKIE_SECURE, sameSite: 'strict', path: '/', maxAge });
-
-function getSession(req) {
-  const raw = req.headers.cookie || '';
-  const m = raw.split(';').map(v => v.trim()).find(v => v.startsWith(COOKIE_NAME + '='));
-  if (!m) return null;
-  const sid = decodeURIComponent(m.slice(COOKIE_NAME.length + 1));
-  const it = sessions.get(sid);
-  if (!it || it.expires < Date.now()) { sessions.delete(sid); return null; }
-  it.expires = Date.now() + SESSION_TTL;
-  return it;
-}
-const requireAuth = (req, res, next) => getSession(req) ? next() : res.status(401).json({ ok: false, error: 'Vui long dang nhap.' });
-
-function publicState() {
-  return {
-    running: watcherRunning,
-    paused: S.paused,
-    lastCode: S.lastCode,
-    uptimeMinutes: Math.round((Date.now() - S.startTime) / 6000) / 10,
-    totalAccounts: S.accounts.length,
-    loggedIn: S.accounts.filter(a => a.loggedIn).length,
-    accounts: S.accounts.map(a => ({ username: a.username, loggedIn: a.loggedIn, lastError: a.lastError || '' })),
-    logs: S.logs.slice(0, 80),
-    dataFile: DATA_FILE,
-  };
+// Middleware kiểm tra Key
+function requireKey(req, res, next) {
+  const key = req.headers['x-api-key'];
+  if (key === 'ADMIN') {
+     return next(); // Admin bypass
+  }
+  if (!key || !users[key]) {
+    return res.status(401).json({ ok: false, error: 'Key không hợp lệ hoặc đã bị xóa.' });
+  }
+  req.userKey = key;
+  next();
 }
 
-// ---- AUTH ----
-app.post('/api/login', loginLimiter, (req, res) => {
-  const { username, password } = req.body || {};
-  if (!safeEqual(username || '', WEB_USER) || !safeEqual(password || '', WEB_PASSWORD))
-    return res.status(401).json({ ok: false, error: 'Sai ten dang nhap hoac mat khau.' });
-  const sid = crypto.randomBytes(32).toString('hex');
-  sessions.set(sid, { expires: Date.now() + SESSION_TTL });
-  res.cookie(COOKIE_NAME, sid, cookieOpts(SESSION_TTL));
-  res.json({ ok: true });
-});
-app.post('/api/logout', requireAuth, (req, res) => {
-  const raw = req.headers.cookie || '';
-  const m = raw.split(';').map(v => v.trim()).find(v => v.startsWith(COOKIE_NAME + '='));
-  if (m) sessions.delete(decodeURIComponent(m.slice(COOKIE_NAME.length + 1)));
-  res.clearCookie(COOKIE_NAME, cookieOpts(0));
-  res.json({ ok: true });
-});
+// ---------------- API CHO NGƯỜI DÙNG ----------------
 
-// ---- STATE ----
-app.get('/api/state', requireAuth, apiLimiter, (req, res) => res.json({ ok: true, state: publicState() }));
-
-// ---- ACCOUNTS ----
-app.post('/api/accounts/add', requireAuth, apiLimiter, (req, res) => {
-  const b = req.body || {};
-  const list = Array.isArray(b.accounts) ? b.accounts : [{ username: b.username, password: b.password }];
-  const added = [], errors = [];
-  for (const it of list) {
-    const u = String(it.username || '').trim();
-    const p = String(it.password || '').trim();
-    if (!/^[A-Za-z0-9_.-]{2,64}$/.test(u)) { errors.push(u + ': username khong hop le'); continue; }
-    if (!p || p.length > 200 || /[\r\n]/.test(p)) { errors.push(u + ': password khong hop le'); continue; }
-    if (S.accounts.some(a => a.username === u)) { errors.push(u + ': da ton tai'); continue; }
-    S.accounts.push({ username: u, password: hashPass(p), loggedIn: false, at: '', jwt: '', lastError: '' });
-    added.push(u);
-  }
-  if (added.length) {
-    saveData();
-    log('Them ' + added.length + ' acc: ' + added.join(', '));
-    Promise.all(S.accounts.filter(a => added.includes(a.username)).map(loginOne))
-      .then(() => saveData()).catch(() => {});
-  }
-  res.json({ ok: true, added, errors, state: publicState() });
-});
-
-app.post('/api/accounts/del', requireAuth, apiLimiter, (req, res) => {
-  const u = String((req.body || {}).username || '').trim();
-  const before = S.accounts.length;
-  S.accounts = S.accounts.filter(a => a.username !== u);
-  if (S.accounts.length === before) return res.status(404).json({ ok: false, error: 'Khong tim thay acc.' });
-  saveData();
-  log('Xoa acc: ' + u);
-  res.json({ ok: true, state: publicState() });
-});
-
-app.post('/api/accounts/relogin', requireAuth, apiLimiter, async (req, res) => {
-  const result = await loginAll();
-  saveData();
-  res.json({ ok: true, result, state: publicState() });
-});
-
-// ---- REDEEM ----
-app.post('/api/redeem', requireAuth, apiLimiter, async (req, res) => {
-  const code = String((req.body || {}).code || '').trim();
-  if (!/^[A-Za-z0-9_-]{3,40}$/.test(code)) return res.status(400).json({ ok: false, error: 'Code khong hop le.' });
-  const result = await redeemAll(code.toUpperCase());
-  res.json({ ok: true, result, state: publicState() });
-});
-
-// ---- CONTROL ----
-app.post('/api/control', requireAuth, apiLimiter, (req, res) => {
-  const action = String((req.body || {}).action || '');
-  if (action === 'pause') { S.paused = true; log('TAM DUNG watcher'); }
-  else if (action === 'resume') { S.paused = false; log('CHAY TIEP watcher'); }
-  else return res.status(400).json({ ok: false, error: 'Action khong hop le.' });
-  res.json({ ok: true, state: publicState() });
-});
-
-// ---- EXPORT / IMPORT ----
-app.get('/api/export', requireAuth, apiLimiter, (req, res) => {
-  res.setHeader('Content-Disposition', 'attachment; filename="lc79-accounts.json"');
+// Lấy trạng thái tool của user
+app.get('/api/user/state', requireKey, (req, res) => {
+  const u = users[req.userKey];
   res.json({
-    exportedAt: new Date().toISOString(),
-    accounts: S.accounts.map(a => ({ username: a.username, password: a.password }))
+    ok: true,
+    state: {
+      active: u.active,
+      account: u.account ? { username: u.account.u, loggedIn: u.account.loggedIn, error: u.account.lastError } : null,
+      logs: u.logs,
+      lastCode: lastGlobalCode
+    }
   });
 });
 
-app.post('/api/import', requireAuth, apiLimiter, (req, res) => {
-  const b = req.body || {};
-  if (!Array.isArray(b.accounts)) return res.status(400).json({ ok: false, error: 'Du lieu import khong hop le.' });
-  let added = 0, skipped = 0;
-  for (const it of b.accounts) {
-    const u = String(it.username || '').trim();
-    const p = String(it.password || '').trim();
-    if (!/^[A-Za-z0-9_.-]{2,64}$/.test(u) || !p) { skipped++; continue; }
-    if (S.accounts.some(a => a.username === u)) { skipped++; continue; }
-    S.accounts.push({ username: u, password: hashPass(p), loggedIn: false, at: '', jwt: '', lastError: '' });
-    added++;
-  }
-  saveData();
-  log('Import: +' + added + ' acc, skip ' + skipped);
-  Promise.all(S.accounts.filter(a => !a.loggedIn).map(loginOne)).then(() => saveData()).catch(() => {});
-  res.json({ ok: true, added, skipped, state: publicState() });
+// Thêm acc (Giới hạn 1 acc)
+app.post('/api/user/account', requireKey, async (req, res) => {
+  const { username, password } = req.body;
+  if (!username || !password) return res.status(400).json({ ok: false, error: 'Thiếu thông tin.' });
+  
+  const u = users[req.userKey];
+  if (u.account) return res.status(400).json({ ok: false, error: 'Bạn đã thêm 1 acc rồi. Vui lòng xóa acc cũ trước khi thêm mới.' });
+
+  u.account = { u: username, p: hashPass(password), loggedIn: false, at: '', jwt: '', lastError: '' };
+  await loginAcc(req.userKey);
+  res.json({ ok: true });
 });
 
-// ==================== SERVE index.html ====================
+// Xóa acc
+app.delete('/api/user/account', requireKey, (req, res) => {
+  users[req.userKey].account = null;
+  users[req.userKey].active = false;
+  addLog(req.userKey, 'Đã xóa acc.');
+  res.json({ ok: true });
+});
+
+// Bật / Tắt tool
+app.post('/api/user/toggle', requireKey, (req, res) => {
+  const u = users[req.userKey];
+  if (!u.account) return res.status(400).json({ ok: false, error: 'Vui lòng thêm acc trước khi bật tool.' });
+  u.active = !u.active;
+  addLog(req.userKey, u.active ? 'BẬT tool tự động.' : 'TẮT tool tự động.');
+  res.json({ ok: true, active: u.active });
+});
+
+// Thêm API Lấy log thủ công
+app.post('/api/user/clear-log', requireKey, (req, res) => {
+  users[req.userKey].logs = [];
+  res.json({ ok: true });
+});
+
+
+// ---------------- API CHO ADMIN ----------------
+app.post('/api/admin/login', (req, res) => {
+  if (req.body.password === ADMIN_PASS) {
+    return res.json({ ok: true, adminPass: ADMIN_PASS }); // Trả về pass để lưu tạm vào sessionStorage
+  }
+  res.status(401).json({ ok: false, error: 'Sai mật khẩu Admin.' });
+});
+
+app.get('/api/admin/keys', (req, res) => {
+  if (req.headers['x-api-key'] !== 'ADMIN') return res.status(401).json({ ok: false });
+  const list = Object.keys(users).map(k => ({
+    key: k,
+    hasAcc: !!users[k].account,
+    username: users[k].account ? users[k].account.u : '',
+    active: users[k].active
+  }));
+  res.json({ ok: true, keys: list });
+});
+
+app.post('/api/admin/keys', (req, res) => {
+  if (req.headers['x-api-key'] !== 'ADMIN') return res.status(401).json({ ok: false });
+  const newKey = generateKey();
+  users[newKey] = { account: null, active: false, logs: [] };
+  addLog('SYS', 'Admin tạo Key mới: ' + newKey);
+  res.json({ ok: true, key: newKey });
+});
+
+app.delete('/api/admin/keys/:key', (req, res) => {
+  if (req.headers['x-api-key'] !== 'ADMIN') return res.status(401).json({ ok: false });
+  const k = req.params.key;
+  if (users[k]) {
+    delete users[k];
+    addLog('SYS', 'Admin xóa Key: ' + k);
+    res.json({ ok: true });
+  } else {
+    res.status(404).json({ ok: false });
+  }
+});
+
+
+// ---------------- GIAO DIỆN ----------------
 app.get('/', (req, res) => res.sendFile(INDEX_FILE));
-app.get('*', (req, res) => res.sendFile(INDEX_FILE));
 
 // ==================== BOOT ====================
-loadData();
 const server = app.listen(PORT, HOST, () => {
-  console.log('LC79 Web nghe tai http://' + HOST + ':' + PORT);
-  watcherLoop().catch(e => log('Watcher chet: ' + (e.message || e)));
+  console.log('Server Multi-User nghe tai http://' + HOST + ':' + PORT);
+  watcherLoop().catch(e => console.log('Watcher chet: ' + e.message));
 });
-function shutdown() { server.close(() => process.exit(0)); setTimeout(() => process.exit(1), 5000).unref(); }
-process.on('SIGINT', shutdown);
-process.on('SIGTERM', shutdown);
