@@ -10,7 +10,7 @@ const path = require('path');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const COOKIE_SECURE = process.env.COOKIE_SECURE === '1';
-const ADMIN_PASS = process.env.WEB_PASSWORD || 'admin123456789'; 
+const ADMIN_PASS = process.env.WEB_PASSWORD || 'tranvanphan10112009@'; 
 const INDEX_FILE = path.join(__dirname, 'index.html');
 
 if (!ADMIN_PASS || ADMIN_PASS.length < 12) {
